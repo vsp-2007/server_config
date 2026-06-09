@@ -1,6 +1,10 @@
-# Pi Server Setup
+# Intractive Server Setup script for debian based systems
+# Initially developed for raspberry pi os (trixie) on a arm64(Aarch64) device
+Note:-
+>_there might be compatablity issues with other debian based distros_.
+> And some package and application might not work or install due to  architectural mismatches(Aarch64-Aarch32-x86-x64) 
 
-Welcome to the **Pi Server Setup** project. The objective of this project is to transform a standard Raspberry Pi OS (Trixie) installation into a powerful, automated, and observable server stack.
+Welcome to the **Server Setup** project. The objective of this project is to transform a standard Raspberry Pi OS (Trixie) installation into a powerful, automated, and observable server stack.
 
 ## 🚀 Features
 

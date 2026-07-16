@@ -1,0 +1,41 @@
+[Unit]
+Description=Alertmanager
+Documentation=https://github.com/prometheus/alertmanager
+After=network.target
+
+[Service]
+Type=simple
+User=alertmanager
+Group=alertmanager
+ExecStart=/usr/local/bin/alertmanager \
+    --config.file=/etc/alertmanager/alertmanager.yml \
+    --storage.path=/var/lib/alertmanager \
+    --web.listen-address=0.0.0.0:9093 \
+    --cluster.listen-address=0.0.0.0:9094
+Restart=always
+RestartSec=10
+TimeoutStartSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/alertmanager /etc/alertmanager
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,59 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'pi-server'
+    environment: 'home'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - 'localhost:9093'
+
+rule_files:
+  - '/etc/prometheus/alert_rules.yml'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['localhost:9093']
+
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['localhost:3000']
+
+  - job_name: 'pihole'
+    static_configs:
+      - targets: ['localhost:9617']
+    metrics_path: '/metrics'
+
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['localhost:9113']
+
+  - job_name: 'stirling-pdf'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/actuator/prometheus'
+
+  - job_name: 'n8n'
+    static_configs:
+      - targets: ['localhost:5678']
+    metrics_path: '/metrics/prometheus'
+
+  - job_name: 'cockpit'
+    static_configs:
+      - targets: ['localhost:9091']
+
+  - job_name: 'webmin'
+    static_configs:
+      - targets: ['localhost:10000']

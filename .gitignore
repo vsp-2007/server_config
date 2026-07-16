@@ -1,0 +1,88 @@
+# Pi Server Setup v2 - Git Ignore
+
+# Configuration files with secrets
+settings.conf
+*.conf
+*.env
+*.key
+*.pem
+*.crt
+
+# Log files
+*.log
+/var/log/pi-server-setup/
+/var/log/pi-server-bot/
+
+# State and backup directories
+/var/lib/pi-server-setup/
+/var/lib/pi-server-bot/
+/opt/pi-server-bot/
+
+# Systemd override directories
+/etc/systemd/system/*.service.d/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+*.orig
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/pi-server-*
+/tmp/*.deb
+/tmp/*.tar.gz
+/tmp/webmin-setup-repo.sh
+
+# Build artifacts
+*.tar.gz
+*.zip
+dist/
+build/
+*.deb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Dependabot
+.github/dependabot.yml
+
+# IDE specific
+.project
+.classpath
+.settings/
+*.launch
+
+# Local development
+.local/
+dev-*.sh

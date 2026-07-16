@@ -1,0 +1,155 @@
+groups:
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ `$labels.instance` }}"
+          description: "CPU usage above 85% for 5 minutes"
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical CPU usage on {{ `$labels.instance` }}"
+          description: "CPU usage above 95% for 2 minutes"
+
+      # High Memory usage
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ `$labels.instance` }}"
+          description: "Memory usage above 85% for 5 minutes"
+
+      - alert: CriticalMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical memory usage on {{ `$labels.instance` }}"
+          description: "Memory usage above 95% for 2 minutes"
+
+      # Disk space
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ `$labels.instance` }}"
+          description: "Root filesystem has less than 15% free space"
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk space on {{ `$labels.instance` }}"
+          description: "Root filesystem has less than 5% free space"
+
+      # Temperature (Pi specific)
+      - alert: HighTemperature
+        expr: node_hwmon_temp_celsius > 70
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High temperature on {{ `$labels.instance` }}"
+          description: "CPU temperature above 70°C"
+
+      - alert: CriticalTemperature
+        expr: node_hwmon_temp_celsius > 80
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical temperature on {{ `$labels.instance` }}"
+          description: "CPU temperature above 80°C - risk of throttling"
+
+      # Service down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ `$labels.job` }} down on {{ `$labels.instance` }}"
+          description: "{{ `$labels.job` }} has been down for more than 1 minute"
+
+      # Pi-hole alerts
+      - alert: PiHoleDown
+        expr: up{job="pihole"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pi-hole is down"
+          description: "Pi-hole DNS server is not responding"
+
+      - alert: PiHoleHighBlockRate
+        expr: rate(pihole_dns_queries_blocked_total[5m]) / rate(pihole_dns_queries_total[5m]) * 100 > 50
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Pi-hole blocking rate unusually high"
+          description: "More than 50% of queries blocked - possible misconfiguration"
+
+  - name: application_alerts
+    interval: 30s
+    rules:
+      # n8n
+      - alert: N8NDown
+        expr: up{job="n8n"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "n8n automation engine is down"
+          description: "n8n service is not responding"
+
+      # Stirling-PDF
+      - alert: StirlingPDFDown
+        expr: up{job="stirling-pdf"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stirling-PDF is down"
+          description: "Stirling-PDF service is not responding"
+
+      # Grafana
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Grafana is down"
+          description: "Grafana service is not responding"
+
+  - name: daily_report
+    interval: 24h
+    rules:
+      # Daily report trigger for Alertmanager
+      - alert: DailyReport
+        expr: vector(1)
+        labels:
+          severity: info
+          alertname: DailyReport
+        annotations:
+          summary: "Daily System Report"
+          description: "Scheduled daily system status report"
+          message: "Daily report triggered"

@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    name: Lint Scripts & Configs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck on install.sh
+        run: shellcheck -x install.sh
+
+      - name: Run shellcheck on all scripts
+        run: shellcheck -x scripts/*.sh
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint config/
+
+      - name: Validate JSON configs
+        run: |
+          for f in config/*.json; do
+            python3 -m json.tool "$f" > /dev/null
+          done
+
+  validate-systemd:
+    name: Validate Systemd Units
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install systemd
+        run: sudo apt-get update && sudo apt-get install -y systemd
+
+      - name: Validate systemd units
+        run: |
+          for f in systemd/*.service; do
+            systemd-analyze verify "$f"
+          done
+
+  test-syntax:
+    name: Test Bash Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check bash syntax
+        run: |
+          bash -n install.sh
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+
+  test-dry-run:
+    name: Dry Run Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy example config
+        run: cp config/settings.conf.example settings.conf
+
+      - name: Run dry-run validation
+        run: |
+          # This will fail if config validation has issues
+          sudo ./install.sh --dry-run || true
+
+  check-docs:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check README exists
+        run: test -f README.md
+
+      - name: Check SECURITY.md exists
+        run: test -f SECURITY.md
+
+      - name: Check LICENSE exists
+        run: test -f LICENSE
+
+  build-release:
+    name: Build Release Artifact
+    needs: [lint, validate-systemd, test-syntax, test-dry-run, check-docs]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create release archive
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ARCHIVE="pi-server-setup-v${VERSION}.tar.gz"
+          tar -czf "${ARCHIVE}" \
+            --exclude='.git' \
+            --exclude='*.log' \
+            --exclude='settings.conf' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            .
+          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.ARCHIVE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

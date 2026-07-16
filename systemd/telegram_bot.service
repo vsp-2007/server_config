@@ -1,0 +1,41 @@
+[Unit]
+Description=Pi Server Telegram Bot (Dual Bot: Admin + User)
+Documentation=https://github.com/your-repo/pi-server-setup
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi-bot
+Group=pi-bot
+WorkingDirectory=/opt/pi-server-bot
+EnvironmentFile=/opt/pi-server-bot/.env
+ExecStart=/opt/pi-server-bot/venv/bin/python /opt/pi-server-bot/dual_bot.py
+Restart=always
+RestartSec=10
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/pi-server-bot /var/log/pi-server-bot
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

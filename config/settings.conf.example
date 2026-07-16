@@ -1,0 +1,162 @@
+# Pi Server Setup v2 - Configuration File
+# Copy this file to settings.conf and fill in your values
+# NEVER commit settings.conf to git - it contains secrets!
+# 
+# Security Notes:
+# - Keep this file chmod 600 (root read/write only)
+# - Consider using a secret manager (HashiCorp Vault, AWS Secrets Manager, etc.) for production
+# - Rotate secrets periodically
+
+################################################################################
+# SYSTEM USER CONFIGURATION
+################################################################################
+# System user to create/manage (will be added to sudo, docker, etc.)
+PI_USER="piadmin"
+PI_PASSWORD=""  # Leave empty to prompt interactively (RECOMMENDED)
+PI_SSH_KEYS=""  # SSH public keys (one per line, base64 encoded or raw). Empty = password auth only
+
+################################################################################
+# NETWORK CONFIGURATION
+################################################################################
+# Tailscale
+TAILSCALE_AUTH_KEY=""  # Optional: Auth key for unattended setup
+TAILSCALE_EXIT_NODE="false"  # Advertise as exit node? (true/false)
+
+# Static IP (Optional - prefer DHCP reservation on router instead)
+STATIC_IP=""           # e.g., 192.168.1.100/24
+STATIC_GATEWAY=""      # e.g., 192.168.1.1
+STATIC_DNS="1.1.1.1"   # DNS server (Cloudflare default)
+
+################################################################################
+# PI-HOLE CONFIGURATION
+################################################################################
+PIHOLE_PASSWORD=""     # Leave empty to prompt interactively (RECOMMENDED)
+PIHOLE_BLOCKLISTS="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling-porn/hosts,\
+https://raw.githubusercontent.com/PolishFiltersTeam/KADhosts/master/KADhosts.txt,\
+https://v.firebog.net/hosts/AdguardDNS.txt,\
+https://adaway.org/hosts.txt,\
+https://v.firebog.net/hosts/Admiral.txt,\
+https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt,\
+https://v.firebog.net/hosts/Easylist.txt,\
+https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext,\
+https://raw.githubusercontent.com/FadeMind/hosts.extras/master/UncheckyAds/hosts,\
+https://raw.githubusercontent.com/bigdargon/hostsVN/master/hosts,\
+https://v.firebog.net/hosts/Easyprivacy.txt,\
+https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.2o7Net/hosts,\
+https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt,\
+https://hostfiles.frogeye.fr/firstparty-trackers-hosts.txt,\
+https://raw.githubusercontent.com/DandelionSprout/adfilt/master/Alternate%20versions%20Anti-Malware%20List/AntiMalwareHosts.txt,\
+https://v.firebog.net/hosts/Prigent-Crypto.txt,\
+https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.Risk/hosts,\
+https://phishing.army/download/phishing_army_blocklist_extended.txt,\
+https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt,\
+https://raw.githubusercontent.com/Spam404/lists/master/main-blacklist.txt,\
+https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/generated/hosts,\
+https://urlhaus.abuse.ch/downloads/hostfile/,\
+https://lists.cyberhost.uk/malware.txt"
+
+################################################################################
+# MONITORING STACK CONFIGURATION
+################################################################################
+# Prometheus
+PROMETHEUS_VERSION="2.54.1"
+PROMETHEUS_RETENTION="15d"
+PROMETHEUS_RETENTION_SIZE="2GB"
+
+# Node Exporter
+NODE_EXPORTER_VERSION="1.8.2"
+
+# Alertmanager
+ALERTMANAGER_VERSION="0.27.0"
+
+# Grafana
+GRAFANA_ADMIN_USER="admin"
+GRAFANA_ADMIN_PASSWORD=""  # Leave empty to prompt (RECOMMENDED - min 8 chars)
+GRAFANA_VERSION="11.1.0"
+
+################################################################################
+# FILE SHARING CONFIGURATION
+################################################################################
+# Samba
+SMB_USER="smbuser"
+SMB_PASSWORD=""  # Leave empty to prompt (RECOMMENDED)
+SMB_SHARE_PATH="/srv/samba/share"
+SMB_SHARE_NAME="pishare"
+
+# Webmin
+WEBMIN_ENABLED="true"
+WEBMIN_PORT="10000"
+
+################################################################################
+# TELEGRAM BOT CONFIGURATION
+################################################################################
+# Admin Bot (Private - full control, alerts)
+TELEGRAM_ADMIN_TOKEN=""      # Bot token from @BotFather
+TELEGRAM_ADMIN_CHAT_ID=""    # Your personal/user chat ID (numeric)
+
+# User Bot (Public/Group - status reporting only)
+TELEGRAM_USER_TOKEN=""       # Bot token from @BotFather
+TELEGRAM_USER_CHAT_ID=""     # Group chat ID for status reports (negative number for groups)
+
+################################################################################
+# APPLICATION SERVICES
+################################################################################
+# LocalSend
+LOCALSEND_VERSION="1.17.0"
+LOCALSEND_PORT="53317"
+
+# Stirling-PDF
+STIRLING_PDF_VERSION="2.4.5"
+STIRLING_PDF_PORT="8080"
+STIRLING_PDF_MEMORY_MIN="512m"
+STIRLING_PDF_MEMORY_MAX="1024m"
+
+# Nginx Reverse Proxy
+NGINX_ENABLED="true"
+DOMAIN_SUFFIX=".home"  # Local domain suffix (e.g., dashboard.home)
+
+# Cockpit
+COCKPIT_PORT="9091"
+
+# n8n
+N8N_VERSION="latest"
+N8N_PORT="5678"
+N8N_WEBHOOK_URL="http://n8n.home"
+
+################################################################################
+# SECURITY HARDENING
+################################################################################
+# SSH Hardening
+SSH_PORT="22"              # Change to non-standard port (e.g., 2222) for security
+SSH_PERMIT_ROOT_LOGIN="no"
+SSH_PASSWORD_AUTH="no"     # Set to "no" after configuring SSH keys (RECOMMENDED)
+SSH_PUBKEY_AUTH="yes"
+SSH_MAX_AUTH_TRIES="3"
+
+# Firewall (UFW)
+UFW_ENABLED="true"
+UFW_DEFAULT_DENY_INCOMING="yes"
+UFW_DEFAULT_ALLOW_OUTGOING="yes"
+
+# Fail2Ban
+FAIL2BAN_ENABLED="true"
+FAIL2BAN_BANTIME="1h"
+FAIL2BAN_FINDTIME="10m"
+FAIL2BAN_MAXRETRY="3"
+
+# Unattended Upgrades
+UNATTENDED_UPGRADES="true"
+UNATTENDED_UPGRADES_EMAIL=""  # Email for notifications (optional)
+
+################################################################################
+# VERSION PINNING (DO NOT MODIFY UNLESS YOU KNOW WHAT YOU'RE DOING)
+################################################################################
+# These versions are tested and known to work together
+PROMETHEUS_VERSION="2.54.1"
+ALERTMANAGER_VERSION="0.27.0"
+NODE_EXPORTER_VERSION="1.8.2"
+GRAFANA_VERSION="11.1.0"
+LOCALSEND_VERSION="1.17.0"
+STIRLING_PDF_VERSION="2.4.5"
+N8N_VERSION="1.64.1"
+NODEJS_VERSION="20"

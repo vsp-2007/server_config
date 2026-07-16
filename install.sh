@@ -12,6 +12,7 @@ readonly SCRIPT_VERSION="2.0.0-experimental"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_NAME="pi-server-setup"
 readonly CONFIG_FILE_DEFAULT="${SCRIPT_DIR}/settings.conf"
+readonly CONFIG_FILE_EXAMPLE="${SCRIPT_DIR}/config/settings.conf.example"
 readonly LOG_DIR="/var/log/${PROJECT_NAME}"
 readonly LOG_FILE="${LOG_DIR}/install_$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_DIR="/var/lib/${PROJECT_NAME}"
@@ -140,7 +141,7 @@ check_arch() {
 }
 
 # ============================================================================
-# CRITICAL: Run this FIRST to ensure log directory exists
+# CRITICAL: Run this FIRST to ensure log directory exists before any logging
 # ============================================================================
 setup_directories() {
     mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
@@ -512,7 +513,7 @@ run_tui_mode() {
     local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
         ((current++))
-        $tool --title "Installing $module" --gauge "Installing $module ($current of $total)..." 8 70 $((current * 100 / total)) &
+        $tool --title "Installing $module" --gauge "Installing $module ($current of $total)..." 8 70 0 &
         local gauge_pid=$!
         
         if execute_module "$module"; then
@@ -537,7 +538,6 @@ run_tui_mode() {
 # ============================================================================
 main() {
     local config_file="${CONFIG_FILE_DEFAULT}" modules_arg="" non_interactive=false dry_run=false repair_mode=false uninstall_mode=false
-    TUI_MODE=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -558,7 +558,7 @@ Options:
   --repair           Attempt to repair broken installations
   --uninstall        Uninstall modules
   --tui              Terminal UI mode (Experimental)
-  --gui              Web GUI mode (Not yet implemented)
+  --gui              Web GUI mode (Experimental)
 
 Available modules: $(printf '%s, ' "${MODULES[@]}" | sed 's/:.*//g' | sed 's/, $//')
 
@@ -581,20 +581,20 @@ EOF
     done
     
     # Experimental warning
-    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                      ║${NC}"
-    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.          ║${NC}"
-    echo -e "${BOLD}${YELLOW}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
+    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.      ║${NC}"
+    echo -e "${BOLD}${YELLOW}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo
     
-    # Run TUI mode if requested
-    if [[ "${TUI_MODE}" == "true" ]]; then
+    # Check for TUI mode
+    if [[ "${TUI_MODE:-false}" == "true" ]]; then
         log_info "Starting in TUI mode (Experimental)"
         run_tui_mode
         exit $?
     fi
     
-    # CLI Mode Selection (default to CLI)
+    # CLI Mode Selection
     if [[ "${non_interactive}" != "true" ]]; then
         echo -e "${BOLD}Select installation mode:${NC}"
         echo "  ${GREEN}1)${NC} CLI - Stable, production-ready (DEFAULT)"

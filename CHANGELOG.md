@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-architecture support (arm64, armv7, amd64)
 - Comprehensive security hardening (systemd, UFW, Fail2Ban, SSH)
 - Dual Telegram bot architecture (Admin + User)
-- Pin-hole with curated blocklists & automated whitelisting
+- Pi-hole with curated blocklists & automated whitelisting
 - Prometheus/Grafana/Alertmanager monitoring stack
 - Nginx reverse proxy with local `.home` domains
 - Samba with service-account security model
@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive and non-interactive installation modes
 - Dependency resolution between modules
 - Backup before modifying system configs
+- **Platform support expanded**: Now runs on any Debian 13+/Ubuntu 24.04+ system (Raspberry Pi, x86_64 laptop, VM, Mini PC, etc.)
 
 ### Fixed
 - CRLF line ending issues (enforced LF)
@@ -76,5 +77,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.0.0 | 2024-12-19 | Major rewrite with security focus |
-| 1.0.0 | 2024-01-15 | Initial release |
+| 2.0.0 | 2024-12-19 | Major rewrite with security focus, multi-platform support |
+| 1.0.0 | 2024-01-15 | Initial release (Pi-only) |

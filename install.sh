@@ -1,13 +1,14 @@
 #!/bin/bash
 # Pi Server Setup v2 - Master Installation Script
 # Modern, secure, and modular server automation for any Debian 13+/Ubuntu 24.04+ system
+# EXPERIMENTAL - Use CLI for stability
 
 set -euo pipefail
 
 # ============================================================================
 # CONSTANTS & GLOBALS
 # ============================================================================
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.0.0-experimental"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_NAME="pi-server-setup"
 readonly CONFIG_FILE_DEFAULT="${SCRIPT_DIR}/settings.conf"
@@ -77,6 +78,9 @@ declare -A MODULE_SCRIPTS=(
     ["cockpit"]="10-cockpit.sh"
     ["n8n"]="11-n8n.sh"
 )
+
+# TUI state
+TUI_MODE=false
 
 # ============================================================================
 # LOGGING FUNCTIONS
@@ -181,7 +185,206 @@ validate_config() {
 }
 
 # ============================================================================
-# INTERACTIVE CONFIGURATION PROMPTING
+# TUI FUNCTIONS (whiptail/dialog)
+# ============================================================================
+check_tui_tool() {
+    if command -v dialog >/dev/null 2>&1; then
+        TUI_TOOL="dialog"
+        return 0
+    elif command -v whiptail >/dev/null 2>&1; then
+        TUI_TOOL="whiptail"
+        return 0
+    fi
+    return 1
+}
+
+install_tui_tool() {
+    log_info "Installing TUI tool (dialog)..."
+    apt-get update -qq && apt-get install -y -qq dialog
+}
+
+tui_show_welcome() {
+    local tool="$1"
+    $tool --title "Pi Server Setup v2 - EXPERIMENTAL" --msgbox \
+        "⚠️  WARNING: This is EXPERIMENTAL software.\n\n\
+Use CLI mode for stability and production use.\n\
+TUI/GUI modes may have issues and are for testing only.\n\n\
+Continue at your own risk." 12 70
+}
+
+tui_select_mode() {
+    local tool="$1"
+    local choice
+    choice=$($tool --title "Installation Mode" --menu \
+        "Select installation interface:\n\n\
+[1] CLI (Recommended) - Stable, production-ready\n\
+[2] TUI - Terminal UI (Experimental, may have issues)\n\n\
+Default: CLI (Press Enter for default)" \
+        15 70 2 \
+        "1" "CLI - Stable, production-ready (DEFAULT)" \
+        "2" "TUI - Terminal UI (Experimental)" \
+        3>&1 1>&2 2>&3)
+    echo "$choice"
+}
+
+tui_select_modules() {
+    local tool="$1"
+    local modules
+    modules=$($tool --title "Module Selection" --checklist \
+        "Select modules to install (Space to toggle, Enter to confirm):\n\n\
+Required modules are pre-selected and cannot be deselected." \
+        20 78 12 \
+        "system" "System Basics (Required)" ON \
+        "network" "Tailscale + Firewall + Fail2Ban" OFF \
+        "pihole" "Pi-hole DNS Ad-blocking" OFF \
+        "monitoring" "Prometheus + Grafana + Alertmanager" OFF \
+        "samba" "Samba + Webmin" OFF \
+        "utils" "Reports + Cron + Maintenance" OFF \
+        "telegram" "Dual Telegram Bot (Admin + User)" OFF \
+        "localsend" "LocalSend File Sharing" OFF \
+        "stirling" "Stirling-PDF" OFF \
+        "nginx" "Nginx Reverse Proxy (.home domains)" OFF \
+        "cockpit" "Cockpit Web Admin" OFF \
+        "n8n" "n8n Automation Engine" OFF \
+        3>&1 1>&2 2>&3)
+    echo "$modules"
+}
+
+tui_get_config() {
+    local tool="$1"
+    local config
+    config=$($tool --title "Configuration" --form \
+        "Enter required configuration (Tab to navigate, Enter to confirm):\n\n\
+Required fields marked with *." \
+        20 78 10 \
+        "PI_USER*"      1 1 "piadmin"     1 20 20 0 \
+        "SSH_PORT*"     2 1 "2222"        2 20 10 0 \
+        "PI_PASSWORD"   3 1 ""            3 20 30 0 \
+        "TELEGRAM_TOKEN" 4 1 ""          4 20 50 0 \
+        "TAILSCALE_KEY" 5 1 ""           5 20 50 0 \
+        "STATIC_IP"     6 1 ""            6 20 20 0 \
+        3>&1 1>&2 2>&3)
+    echo "$config"
+}
+
+tui_confirm_proceed() {
+    local tool="$1"
+    local modules="$2"
+    $tool --title "Confirm Installation" --yesno \
+        "Ready to install the following modules:\n\n$modules\n\n\
+Proceed with installation?" 15 70
+}
+
+tui_show_progress() {
+    local tool="$1"
+    local current="$2"
+    local total="$3"
+    local module="$4"
+    local pct=$((current * 100 / total))
+    $tool --title "Installing $module" --gauge \
+        "Installing $module ($current of $total)..." 8 70 "$pct"
+}
+
+tui_show_summary() {
+    local tool="$1"
+    local summary="$2"
+    $tool --title "Installation Complete" --msgbox \
+        "$summary" 20 70
+}
+
+run_tui_mode() {
+    # Check/install TUI tool
+    if ! check_tui_tool; then
+        log_info "TUI tool not found, installing dialog..."
+        install_tui_tool
+        check_tui_tool || die "Failed to install dialog/whiptail"
+    fi
+    
+    local tool="$TUI_TOOL"
+    
+    # Welcome
+    tui_show_welcome "$tool"
+    
+    # Mode already selected as TUI, proceed
+    log_info "Running in TUI mode (Experimental)"
+    
+    # Module selection
+    local selected_modules
+    selected_modules=$(tui_select_modules "$tool")
+    [[ -z "$selected_modules" ]] && die "No modules selected"
+    
+    # Convert space-separated to array
+    IFS=' ' read -ra MODULES_TO_INSTALL <<< "$selected_modules"
+    
+    # Config form
+    local config_output
+    config_output=$(tui_get_config "$tool")
+    IFS=$'\n' read -r PI_USER SSH_PORT PI_PASSWORD TELEGRAM_TOKEN TAILSCALE_KEY STATIC_IP <<< "$config_output"
+    
+    # Save to config
+    save_config_var "PI_USER" "$PI_USER" "$CONFIG_FILE"
+    save_config_var "SSH_PORT" "$SSH_PORT" "$CONFIG_FILE"
+    [[ -n "$PI_PASSWORD" ]] && save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"
+    [[ -n "$TELEGRAM_TOKEN" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "$TELEGRAM_TOKEN" "$CONFIG_FILE"
+    [[ -n "$TAILSCALE_KEY" ]] && save_config_var "TAILSCALE_AUTH_KEY" "$TAILSCALE_KEY" "$CONFIG_FILE"
+    [[ -n "$STATIC_IP" ]] && save_config_var "STATIC_IP" "$STATIC_IP" "$CONFIG_FILE"
+    
+    # Reload config
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+    
+    # Generate passwords for empty fields
+    [[ -z "${PI_PASSWORD:-}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${PIHOLE_PASSWORD:-}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "PIHOLE_PASSWORD" "$PIHOLE_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${SMB_PASSWORD:-}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "SMB_PASSWORD" "$SMB_PASSWORD" "$CONFIG_FILE"; }
+    
+    # Confirm
+    local module_list=$(printf '%s\n' "${MODULES_TO_INSTALL[@]}")
+    tui_confirm_proceed "$tool" "$module_list" || die "Installation cancelled"
+    
+    # Resolve dependencies
+    resolve_dependencies MODULES_TO_INSTALL
+    
+    # Check already installed
+    local to_install=()
+    for module in "${MODULES_TO_INSTALL[@]}"; do
+        if check_module_installed "$module"; then
+            log_warn "Module $module appears already installed"
+            $tool --yesno "Module $module appears already installed. Reinstall?" 8 60 && to_install+=("$module")
+        else
+            to_install+=("$module")
+        fi
+    done
+    MODULES_TO_INSTALL=("${to_install[@]}")
+    [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
+    
+    # Execute with progress gauge
+    local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
+    for module in "${MODULES_TO_INSTALL[@]}"; do
+        ((current++))
+        tui_show_progress "$tool" "$current" "$total" "$module" &
+        local gauge_pid=$!
+        
+        if execute_module "$module"; then
+            log_success "Module $module completed"
+        else
+            log_error "Module $module failed"
+            failed+=("$module")
+        fi
+        kill $gauge_pid 2>/dev/null || true
+    done
+    
+    # Summary
+    local summary
+    summary=$(generate_summary)
+    tui_show_summary "$tool" "$summary"
+    
+    [[ ${#failed[@]} -gt 0 ]] && exit 1 || exit 0
+}
+
+# ============================================================================
+# INTERACTIVE CONFIGURATION PROMPTING (CLI)
 # ============================================================================
 prompt_missing_config() {
     local config_file="$1"
@@ -275,7 +478,7 @@ prompt_missing_config() {
 
 save_config_var() {
     local var_name="$1" var_value="$2" config_file="$3"
-    local escaped_value; escaped_value=$(printf '%s\n' "${var_value}" | sed 's/[[\.*^$()+?{|\\]/\\&/g')
+    local escaped_value; escaped_value=$(printf '%s\n' "${var_value}" | sed 's/[[\\.*^$()+?{|\\]/\\&/g')
     if grep -q "^${var_name}=" "${config_file}"; then
         sed -i "s|^${var_name}=.*|${var_name}=\"${escaped_value}\"|" "${config_file}"
     else
@@ -285,7 +488,7 @@ save_config_var() {
 }
 
 # ============================================================================
-# MODULE SELECTION
+# MODULE SELECTION (CLI)
 # ============================================================================
 select_modules() {
     local selected_modules="$1" interactive="${2:-true}"
@@ -366,28 +569,36 @@ execute_module() {
     if "${script_path}"; then log_success "Module ${module} completed"; touch "${STATE_DIR}/${module}.installed"; return 0; else log_error "Module ${module} failed"; return $?; fi
 }
 
-show_summary() {
+generate_summary() {
     local ip; ip=$(hostname -I | awk '{print $1}')
-    echo -e "\n${BOLD}${CYAN}=========================================${NC}\n${BOLD}${CYAN}   INSTALLATION SUMMARY${NC}\n${BOLD}${CYAN}=========================================${NC}\nDevice IP: ${GREEN}${ip}${NC}"
+    local summary="Installation Complete!\n\nDevice IP: ${ip}\n\n"
     for module in "${MODULES_TO_INSTALL[@]}"; do
         if [[ -f "${STATE_DIR}/${module}.installed" ]]; then
-            echo -e "${GREEN}✓${NC} ${module}"
+            summary+="✓ ${module}\n"
             case "${module}" in
-                system) echo "    SSH:     ssh ${PI_USER}@${ip}"; echo "    VNC:     ${ip}:5900" ;;
-                network) echo "    Tailscale: Connected" ;;
-                pihole) echo "    Web UI:  http://${ip}/admin"; echo "    Password: ${PIHOLE_PASSWORD}" ;;
-                monitoring) echo "    Prometheus: http://${ip}:9090"; echo "    Grafana:    http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})"; echo "    Alertmanager: http://${ip}:9093" ;;
-                samba) echo "    Webmin: https://${ip}:10000"; echo "    Samba:  \\\\${ip}\\${SMB_SHARE_NAME:-pishare}" ;;
-                telegram) echo "    Service: telegram-bot.service" ;;
-                localsend) echo "    Port: 53317" ;;
-                stirling) echo "    URL: http://${ip}:8080" ;;
-                nginx) echo "    Domains: dashboard.home, pi.home, n8n.home, etc."; echo "    Configure DNS in Pi-hole: http://${ip}:8081/admin/dns_records.php" ;;
-                cockpit) echo "    URL: https://${ip}:9091" ;;
-                n8n) echo "    URL: http://${ip}:5678 (or http://n8n.home)" ;;
-            esac; echo
-        else echo -e "${RED}✗${NC} ${module} (failed or skipped)"; fi
+                system) summary+="    SSH: ssh ${PI_USER}@${ip}\n    VNC: ${ip}:5900\n" ;;
+                network) summary+="    Tailscale: Connected\n" ;;
+                pihole) summary+="    Web UI: http://${ip}/admin\n    Password: ${PIHOLE_PASSWORD}\n" ;;
+                monitoring) summary+="    Prometheus: http://${ip}:9090\n    Grafana: http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})\n    Alertmanager: http://${ip}:9093\n" ;;
+                samba) summary+="    Webmin: https://${ip}:10000\n    Samba: \\\\${ip}\\${SMB_SHARE_NAME:-pishare}\n" ;;
+                telegram) summary+="    Service: telegram-bot.service\n" ;;
+                localsend) summary+="    Port: 53317\n" ;;
+                stirling) summary+="    URL: http://${ip}:8080\n" ;;
+                nginx) summary+="    Domains: dashboard.home, pi.home, n8n.home, etc.\n    Configure DNS in Pi-hole: http://${ip}:8081/admin/dns_records.php\n" ;;
+                cockpit) summary+="    URL: https://${ip}:9091\n" ;;
+                n8n) summary+="    URL: http://${ip}:5678 (or http://n8n.home)\n" ;;
+            esac
+            summary+="\n"
+        else
+            summary+="✗ ${module} (failed or skipped)\n\n"
+        fi
     done
-    echo -e "${BOLD}${CYAN}=========================================${NC}\n${BOLD}${GREEN}Installation Complete!${NC}\nLog file: ${LOG_FILE}\n${BOLD}${CYAN}=========================================${NC}"
+    summary+="\nLog file: ${LOG_FILE}\n"
+    echo -e "$summary"
+}
+
+show_summary() {
+    generate_summary
 }
 
 # ============================================================================
@@ -396,6 +607,7 @@ show_summary() {
 main() {
     local config_file="${CONFIG_FILE_DEFAULT}" modules_arg="" non_interactive=false dry_run=false repair_mode=false uninstall_mode=false
     
+    # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             -y|--yes) non_interactive=true ;;
@@ -413,12 +625,15 @@ Options:
   --dry-run          Validate config without making changes
   --repair           Attempt to repair broken installations
   --uninstall        Uninstall modules
+  --tui              Terminal UI mode (Experimental)
+  --gui              Web GUI mode (Experimental)
 
 Available modules: $(printf '%s, ' "${MODULES[@]}" | sed 's/:.*//g' | sed 's/, $//')
 
 Examples:
-  sudo ./install.sh                          # Interactive full install
-  sudo ./install.sh -y                       # Non-interactive full install
+  sudo ./install.sh                          # Interactive CLI (default)
+  sudo ./install.sh --tui                    # Terminal UI (Experimental)
+  sudo ./install.sh -y                       # Non-interactive CLI
   sudo ./install.sh -m "system,network,pihole"
   sudo ./install.sh --dry-run                # Validate config only
 EOF
@@ -427,12 +642,55 @@ EOF
             --dry-run) dry_run=true ;;
             --repair) repair_mode=true ;;
             --uninstall) uninstall_mode=true ;;
+            --tui) TUI_MODE=true ;;
+            --gui) log_warn "Web GUI not yet implemented. Use --tui for TUI."; exit 1 ;;
             *) die "Unknown option: $1" ;;
         esac; shift
     done
     
+    # Experimental warning
+    echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
+    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.      ║${NC}"
+    echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo
+    
+    # Check for TUI mode
+    if [[ "${TUI_MODE}" == "true" ]]; then
+        log_info "Starting in TUI mode (Experimental)"
+        run_tui_mode
+        exit $?
+    fi
+    
+    # CLI Mode Selection
+    if [[ "${non_interactive}" != "true" ]]; then
+        echo -e "${BOLD}Select installation mode:${NC}"
+        echo "  ${GREEN}1)${NC} CLI - Stable, production-ready (DEFAULT)"
+        echo "  ${YELLOW}2)${NC} TUI - Terminal UI (Experimental, may have issues)"
+        echo
+        read -rp "Select mode [1]: " mode_choice
+        mode_choice="${mode_choice:-1}"
+        
+        case "${mode_choice}" in
+            2)
+                log_warn "Starting TUI mode (Experimental)..."
+                run_tui_mode
+                exit $?
+                ;;
+            1|"")
+                log_info "Starting CLI mode (Stable, production-ready)"
+                ;;
+            *)
+                log_warn "Invalid choice, defaulting to CLI"
+                ;;
+        esac
+    fi
+    
+    # CLI Mode (default)
+    log_info "Starting ${PROJECT_NAME} v${SCRIPT_VERSION} (CLI Mode)"
+    log_info "Log file: ${LOG_FILE}"
+    
     check_root; check_os; check_arch; setup_directories
-    log_info "Starting ${PROJECT_NAME} v${SCRIPT_VERSION}"; log_info "Log file: ${LOG_FILE}"
     
     [[ ! -f "${config_file}" ]] && [[ -f "${CONFIG_FILE_DEFAULT}" ]] && config_file="${CONFIG_FILE_DEFAULT}"
     [[ ! -f "${config_file}" ]] && die "Config file not found. Copy config/settings.conf.example to settings.conf"

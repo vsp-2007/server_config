@@ -1,6 +1,6 @@
 # Contributing to Pi Server Setup v2
 
-Thank you for your interest in contributing! This project aims to provide a secure, modular, and well-documented way to set up a Raspberry Pi as a home server.
+Thank you for your interest in contributing! This project aims to provide a secure, modular, and well-documented way to set up any Debian 13+/Ubuntu 24.04+ system (Raspberry Pi, laptop, VM, server) as a home server.
 
 ## Ways to Contribute
 
@@ -8,13 +8,13 @@ Thank you for your interest in contributing! This project aims to provide a secu
 - 💡 **Feature Requests** - Have an idea for improvement?
 - 📝 **Documentation** - Improve README, SECURITY.md, or code comments
 - 🔧 **Code Contributions** - Fix bugs, add modules, improve scripts
-- 🧪 **Testing** - Test on different Pi models, architectures, OS versions
+- 🧪 **Testing** - Test on different hardware, architectures, OS versions
 
 ## Getting Started
 
 ### Prerequisites
 
-- Raspberry Pi (for testing) or Debian/Ubuntu VM
+- Test hardware: Raspberry Pi, x86_64 laptop, VM, or mini PC
 - Bash 4.4+
 - shellcheck (for linting)
 - yamllint (for YAML validation)
@@ -24,8 +24,8 @@ Thank you for your interest in contributing! This project aims to provide a secu
 
 ```bash
 # Fork and clone your fork
-git clone https://github.com/your-username/pi-server-setup.git
-cd pi-server-setup
+git clone https://github.com/your-username/Interactive-server_config_script.git
+cd Interactive-server_config_script
 
 # Install development tools
 sudo apt-get install shellcheck yamllint python3-yaml
@@ -138,13 +138,16 @@ sudo ./install.sh --dry-run
 sudo ./scripts/00-system.sh
 ```
 
-### Architecture Testing
+### Platform Testing
 
-Test on:
-- [ ] Raspberry Pi OS (arm64) - Pi 4/5
-- [ ] Raspberry Pi OS (armv7) - Pi 3
-- [ ] Debian 12 (amd64) - VM
-- [ ] Ubuntu 22.04/24.04 (amd64) - VM
+Test on (at minimum one from each category):
+
+| Category | Platforms |
+|----------|-----------|
+| **ARM SBC** | Raspberry Pi OS (arm64) - Pi 4/5, Armbian (arm64/armv7) |
+| **x86_64 VM** | Debian 13 (Trixie), Ubuntu 24.04 LTS |
+| **Laptop/Desktop** | Debian 13, Ubuntu 24.04 (auto-detects TLP/thermald) |
+| **VM** | Proxmox/ESXi/VirtualBox with qemu-guest-agent |
 
 ### Integration Testing
 
@@ -168,7 +171,7 @@ Test on:
    - `security: harden telegram bot rate limiting`
 4. **Run validation**: `./tests/validate.sh` must pass
 5. **Push** to your fork
-6. **Open PR** against `main` branch
+6. **Open PR** against `v2-development` branch
 
 ### PR Requirements
 
@@ -198,8 +201,8 @@ Maintainers only:
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/your-repo/pi-server-setup/discussions)
-- Check existing [Issues](https://github.com/your-repo/pi-server-setup/issues)
+- Open a [Discussion](https://github.com/vsp-2007/Interactive-server_config_script/discussions)
+- Check existing [Issues](https://github.com/vsp-2007/Interactive-server_config_script/issues)
 - Review [Security Policy](SECURITY.md) for vulnerability reporting
 
 ---

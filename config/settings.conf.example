@@ -1,0 +1,155 @@
+# Pi Server Setup v3 - Configuration File
+# Copy this file to settings.conf and customize your settings
+# SECURITY: chmod 600 settings.conf after editing (contains secrets!)
+
+# =============================================================================
+# REQUIRED SETTINGS
+# =============================================================================
+
+# System user (will be created with sudo access)
+PI_USER="piadmin"
+PI_PASSWORD=""              # Leave empty to generate random (min 8 chars)
+
+# =============================================================================
+# VPN PROVIDER SELECTION
+# =============================================================================
+
+# VPN Provider: pangolin, tailscale, both, none
+VPN_PROVIDER="pangolin"
+
+# =============================================================================
+# TAILSCALE VPN (https://tailscale.com/)
+# =============================================================================
+
+# Get auth key from: https://login.tailscale.com/admin/settings/auth-keys
+TAILSCALE_AUTH_KEY=""        # Optional: for unattended setup
+TAILSCALE_EXIT_NODE="false"  # Advertise as exit node
+TAILSCALE_HOSTNAME=""        # Optional: custom hostname in Tailscale network
+
+# =============================================================================
+# PANGOLIN VPN (https://pangolin.net/)
+# =============================================================================
+
+# Get auth key from: https://pangolin.net/admin/settings/auth-keys
+PANGOLIN_AUTH_KEY=""         # Optional: for unattended setup
+PANGOLIN_EXIT_NODE="false"   # Advertise as exit node
+PANGOLIN_HOSTNAME=""         # Optional: custom hostname in Pangolin network
+
+# =============================================================================
+# NETWORK (optional - prefer DHCP reservation on router)
+# =============================================================================
+
+STATIC_IP=""                # e.g., "192.168.1.100/24"
+STATIC_GATEWAY=""           # e.g., "192.168.1.1"
+STATIC_DNS="1.1.1.1"
+
+# =============================================================================
+# TELEGRAM BOTS (Optional but recommended for alerts)
+# =============================================================================
+
+# Admin Bot: Full control, private alerts, admin commands
+TELEGRAM_ADMIN_TOKEN=""     # From @BotFather
+TELEGRAM_ADMIN_CHAT_ID=""   # Your user ID from @userinfobot
+
+# User Bot: Public/group status reporting, read-only
+TELEGRAM_USER_TOKEN=""      # From @BotFather (separate bot)
+TELEGRAM_USER_CHAT_ID=""    # Group chat ID (negative number, e.g., -1001234567890)
+
+# =============================================================================
+# SERVICE PASSWORDS (Leave empty to auto-generate secure passwords)
+# =============================================================================
+
+GRAFANA_ADMIN_PASSWORD=""   # Grafana admin password
+PIHOLE_PASSWORD=""          # Pi-hole admin password
+SMB_PASSWORD=""             # Samba password for SMB_USER
+
+# =============================================================================
+# SAMBA / FILE SHARING
+# =============================================================================
+
+SMB_USER="smbuser"          # Samba username (created if not exists)
+
+# =============================================================================
+# PI-HOLE (DNS Ad-blocking)
+# =============================================================================
+
+PIHOLE_EXTRA_BLOCKLIST=""   # Optional: URL to additional blocklist
+
+# =============================================================================
+# MONITORING STACK
+# =============================================================================
+
+PROMETHEUS_RETENTION="15d"
+PROMETHEUS_RETENTION_SIZE="2GB"
+GRAFANA_ADMIN_USER="admin"
+GRAFANA_VERSION="11.1.0"
+PROMETHEUS_VERSION="2.54.1"
+ALERTMANAGER_VERSION="0.27.0"
+NODE_EXPORTER_VERSION="1.8.2"
+
+# =============================================================================
+# OLLAMA (Local LLM Inference) - Auto-detects hardware capability
+# =============================================================================
+
+OLLAMA_ENABLED="true"
+OLLAMA_MODELS="llama3.2:3b,phi3:mini"  # Comma-separated models to pull on install
+OLLAMA_PORT="11434"
+OLLAMA_HOST="0.0.0.0"        # Bind address (0.0.0.0 = all interfaces)
+OLLAMA_KEEP_ALIVE="5m"       # How long to keep models in memory
+OLLAMA_NUM_PARALLEL="1"      # Parallel requests
+OLLAMA_MAX_LOADED_MODELS="1" # Max models in VRAM/RAM
+
+# =============================================================================
+# NGINX REVERSE PROXY
+# =============================================================================
+
+NGINX_ENABLED="true"
+NGINX_DOMAIN_SUFFIX="home"    # Local domain suffix (e.g., pi.home, grafana.home)
+
+# =============================================================================
+# COCKPIT
+# =============================================================================
+
+COCKPIT_ENABLED="true"
+COCKPIT_PORT="9091"
+
+# =============================================================================
+# N8N AUTOMATION
+# =============================================================================
+
+N8N_ENABLED="true"
+N8N_VERSION="1.64.1"
+N8N_PORT="5678"
+N8N_WEBHOOK_URL=""            # e.g., "https://n8n.yourdomain.com" (for production)
+NODEJS_VERSION="20"
+
+# =============================================================================
+# LOCAL SEND
+# =============================================================================
+
+LOCALSEND_ENABLED="true"
+
+# =============================================================================
+# STIRLING-PDF
+# =============================================================================
+
+STIRLING_ENABLED="true"
+STIRLING_PORT="8080"
+
+# =============================================================================
+# SECURITY HARDENING
+# =============================================================================
+
+SSH_PORT="2222"               # Change from default 22
+SSH_PASSWORD_AUTH="no"        # Disable password auth (use SSH keys)
+UFW_ENABLED="true"
+FAIL2BAN_ENABLED="true"
+UNATTENDED_UPGRADES="true"
+
+# =============================================================================
+# UTILITIES / MAINTENANCE
+# =============================================================================
+
+UTILS_ENABLED="true"
+DAILY_REPORT_TIME="07:00"     # Time for daily Telegram report
+DISK_ALERT_THRESHOLD="85"     # Alert when disk usage exceeds this %

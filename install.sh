@@ -53,7 +53,7 @@ fi
 # Module definitions (order matters for dependencies)
 readonly MODULES=(
     "system:System Basics (Updates, User, SSH, Tools, Hardening)"
-    "network:Network (Tailscale, Firewall, Fail2Ban)"
+    "network:Network (VPN: Pangolin/Tailscale, Firewall, Fail2Ban)"
     "pihole:Pi-hole (DNS Ad-blocking)"
     "monitoring:Monitoring Stack (Prometheus, Grafana, Alertmanager, Node Exporter)"
     "samba:File Sharing (Samba, Webmin)"
@@ -64,6 +64,7 @@ readonly MODULES=(
     "nginx:Nginx Reverse Proxy (Local domains)"
     "cockpit:Cockpit (Web-based admin)"
     "n8n:n8n Automation Engine"
+    "ollama:Ollama (Local LLM Inference - auto-detects hardware)"
 )
 
 # Module dependencies
@@ -79,6 +80,7 @@ declare -A MODULE_DEPS=(
     ["nginx"]="system,pihole"
     ["cockpit"]="system"
     ["n8n"]="system,nginx"
+    ["ollama"]="system"
 )
 
 # Module scripts mapping
@@ -95,6 +97,7 @@ declare -A MODULE_SCRIPTS=(
     ["nginx"]="09-reverse-proxy.sh"
     ["cockpit"]="10-cockpit.sh"
     ["n8n"]="11-n8n.sh"
+    ["ollama"]="12-ollama.sh"
 )
 
 # ============================================================================
@@ -471,7 +474,7 @@ check_module_installed() {
     local module="$1"
     case "${module}" in
         system)   command -v btop >/dev/null && systemctl is-active --quiet ssh ;;
-        network)  command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1 ;;
+        network)  (command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1) || (command -v pangolin >/dev/null && pangolin status >/dev/null 2>&1) ;;
         pihole)   command -v pihole >/dev/null ;;
         monitoring) systemctl is-active --quiet prometheus && systemctl is-active --quiet grafana-server ;;
         samba)    systemctl is-active --quiet smbd ;;
@@ -482,6 +485,7 @@ check_module_installed() {
         nginx)    systemctl is-active --quiet nginx ;;
         cockpit)  systemctl is-active --quiet cockpit.socket ;;
         n8n)      systemctl is-active --quiet n8n ;;
+        ollama)   systemctl is-active --quiet ollama ;;
         *) return 1 ;;
     esac
 }

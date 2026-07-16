@@ -15,12 +15,13 @@
 | Category | Components |
 |----------|------------|
 | **System** | Automated updates, user management, SSH hardening, UFW firewall, Fail2Ban, unattended upgrades |
-| **Network** | Tailscale VPN (MagicDNS, Exit Node, Subnet Routes), optional Static IP |
+| **Network** | Pangolin VPN (MagicDNS, Exit Node, Subnet Routes), optional Static IP |
 | **DNS/Ad-block** | Pi-hole with curated blocklists, automated whitelisting, DNSSEC |
 | **Monitoring** | Prometheus, Grafana (pre-provisioned dashboards), Alertmanager, Node Exporter |
 | **File Sharing** | Samba (secure, service-account model), Webmin (web UI) |
 | **Automation** | n8n (workflow automation), Telegram Bot (dual: Admin + User) |
 | **Applications** | LocalSend, Stirling-PDF, Cockpit, Nginx Reverse Proxy |
+| **AI/ML** | Ollama (Local LLM Inference - llama3.2, phi3, etc.) |
 | **Security** | Non-root services, systemd hardening, rate-limited bot, audit logging |
 
 ---
@@ -31,13 +32,13 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Debian 13+ Machine                            │
 ├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   Tailscale  │  │    Pi-hole   │  │    Nginx     │           │
-│  │   (VPN)      │  │   (DNS)      │  │  (Reverse    │           │
-│  └──────┬───────┘  └──────┬───────┘  │   Proxy)     │           │
-│         │                 │          └──────┬───────┘           │
-│         │                 │                 │                   │
-│  ┌──────▼─────────────────▼─────────────────▼───────┐           │
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│   Pangolin   │  │    Pi-hole   │  │    Nginx     │           │
+│   (VPN)      │  │   (DNS)      │  │  (Reverse    │           │
+└──────┬───────┘  └──────┬───────┘  │   Proxy)     │           │
+       │                 │          └──────┬───────┘           │
+       │                 │                 │                   │
+       ▼                 ▼                 ▼                   │
 │  │              Local Services (LAN + Tailscale)   │           │
 │  ├──────────────────────────────────────────────────┤           │
 │  │  Prometheus ← Node Exporter                      │           │
@@ -110,7 +111,7 @@ The installer presents a module selection menu:
 ```
 Select modules to install:
   1) System Basics (Updates, User, SSH, Tools, Hardening)
-  2) Network (Tailscale, Firewall, Fail2Ban)
+  2) Network (VPN: Pangolin/Tailscale, Firewall, Fail2Ban)
   3) Pi-hole (DNS Ad-blocking)
   4) Monitoring Stack (Prometheus, Grafana, Alertmanager, Node Exporter)
   5) File Sharing (Samba, Webmin)
@@ -121,6 +122,7 @@ Select modules to install:
   10) Nginx Reverse Proxy (Local domains)
   11) Cockpit (Web-based administration)
   12) n8n Automation Engine
+  13) Ollama (Local LLM Inference - auto-detects hardware)
   A) Install Everything
   Q) Quit
 ```
@@ -157,9 +159,10 @@ TELEGRAM_ADMIN_CHAT_ID=""   # Your user ID from @userinfobot
 TELEGRAM_USER_TOKEN=""      # For group status bot
 TELEGRAM_USER_CHAT_ID=""    # Group chat ID (negative number)
 
-# Tailscale (optional)
-TAILSCALE_AUTH_KEY=""       # For unattended setup
-TAILSCALE_EXIT_NODE="false"
+# Pangolin VPN (optional) - https://pangolin.net/
+PANGOLIN_AUTH_KEY=""        # For unattended setup
+PANGOLIN_EXIT_NODE="false"
+PANGOLIN_HOSTNAME=""        # Optional custom hostname
 ```
 
 ### Service Passwords (leave empty to auto-generate)
@@ -205,11 +208,13 @@ UNATTENDED_UPGRADES="true"
 - Platform-optimized swap (dphys-swapfile on Pi, swap file elsewhere)
 
 ### 2. Network (`network`)
-- Tailscale installation & authentication
-- Exit node advertisement
-- Subnet route advertisement (LAN access via VPN)
-- MagicDNS + Global Nameserver guidance
+- **VPN Selection**: Choose between Pangolin (recommended), Tailscale, both, or none
+- **Pangolin VPN** (https://pangolin.net/): MagicDNS, exit nodes, subnet routes, Pi-hole integration
+- **Tailscale VPN** (https://tailscale.com/): Alternative with similar features
+- Both VPNs support: Exit node advertisement, subnet route advertisement (LAN access via VPN)
+- MagicDNS + Global Nameserver guidance (full Pi-hole integration with Pangolin)
 - Optional static IP (with strong warnings)
+- **See also:** [Pangolin Setup Guide](docs/PANGOLIN_GUIDE.md) | [Tailscale Setup Guide](docs/TAILSCALE_GUIDE.md)
 
 ### 3. Pi-hole (`pihole`)
 - Unattended installation
@@ -273,6 +278,15 @@ UNATTENDED_UPGRADES="true"
 - Reverse proxy ready
 - Secure cookie handling
 
+### 13. Ollama (`ollama`)
+- Local LLM inference engine (no cloud dependency)
+- Supports llama3.2, phi3, mistral, gemma, and 100+ models
+- REST API compatible with OpenAI format
+- GPU acceleration support (auto-detect CUDA/ROCm/Metal)
+- Configurable model persistence and memory management
+- Reverse proxy integration via Nginx
+- Systemd hardening with resource limits
+
 ---
 
 ## 🌐 Access URLs (after install)
@@ -288,6 +302,7 @@ UNATTENDED_UPGRADES="true"
 | Cockpit | `https://<IP>:9091` | `http://dashboard.home` |
 | Webmin | `https://<IP>:10000` | `http://webmin.home` |
 | Samba | `\\<IP>\pishare` | - |
+| **Ollama** | `http://<IP>:11434` | `http://ollama.home` |
 
 > **Note**: Configure Pi-hole Local DNS (`http://pi.home/admin/dns_records.php`) to map `.home` domains to your server's IP.
 

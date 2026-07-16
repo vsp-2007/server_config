@@ -421,6 +421,8 @@ install_tui_tool() {
 }
 
 run_tui_mode() {
+    log_info "Starting TUI mode..."
+    
     if ! check_tui_tool; then
         log_info "TUI tool not found, installing dialog..."
         install_tui_tool
@@ -435,6 +437,7 @@ run_tui_mode() {
     
     # Module selection
     local selected_modules
+    log_info "Opening module selection dialog..."
     selected_modules=$($tool --title "Module Selection" --checklist \
         "Select modules to install (Space to toggle, Enter to confirm):\n\nRequired modules are pre-selected and cannot be deselected." \
         20 78 12 \
@@ -451,10 +454,15 @@ run_tui_mode() {
         "cockpit" "Cockpit Web Admin" OFF \
         "n8n" "n8n Automation Engine" OFF \
         3>&1 1>&2 2>&3)
+    local ret=$?
+    log_info "Module selection dialog returned: ${ret}"
+    [[ $ret -ne 0 ]] && die "Module selection cancelled"
     [[ -z "$selected_modules" ]] && die "No modules selected"
     IFS=' ' read -ra MODULES_TO_INSTALL <<< "$selected_modules"
+    log_info "Selected modules: ${MODULES_TO_INSTALL[*]}"
     
     # Config form
+    log_info "Opening configuration form..."
     local config_output
     config_output=$($tool --title "Configuration" --form \
         "Enter required configuration (Tab to navigate, Enter to confirm):\n\nRequired fields marked with *." \
@@ -466,7 +474,11 @@ run_tui_mode() {
         "TAILSCALE_KEY" 5 1 ""           5 20 50 0 \
         "STATIC_IP"     6 1 ""            6 20 20 0 \
         3>&1 1>&2 2>&3)
+    local ret=$?
+    log_info "Config form returned: ${ret}"
+    [[ $ret -ne 0 ]] && die "Configuration cancelled"
     IFS=$'\n' read -r PI_USER SSH_PORT PI_PASSWORD TELEGRAM_TOKEN TAILSCALE_KEY STATIC_IP <<< "$config_output"
+    log_info "Config values: PI_USER=${PI_USER}, SSH_PORT=${SSH_PORT}, STATIC_IP=${STATIC_IP}"
     
     save_config_var "PI_USER" "$PI_USER" "$CONFIG_FILE"
     save_config_var "SSH_PORT" "$SSH_PORT" "$CONFIG_FILE"
@@ -487,9 +499,11 @@ run_tui_mode() {
     
     # Confirm
     local module_list=$(printf '%s\n' "${MODULES_TO_INSTALL[@]}")
+    log_info "Showing confirmation dialog..."
     $tool --title "Confirm Installation" --yesno "Ready to install the following modules:\n\n$module_list\n\nProceed with installation?" 15 70 || die "Installation cancelled"
     
     # Resolve dependencies
+    log_info "Resolving dependencies..."
     resolve_dependencies MODULES_TO_INSTALL
     
     # Check already installed
@@ -509,6 +523,7 @@ run_tui_mode() {
     local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
         ((current++))
+        log_info "Installing module: ${module} (${current}/${#MODULES_TO_INSTALL[@]})"
         $tool --title "Installing $module" --gauge "Installing $module ($current of $total)..." 8 70 $((current * 100 / total)) &
         local gauge_pid=$!
         
@@ -578,10 +593,10 @@ EOF
     done
     
     # Experimental warning
-    echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
     echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.          ║${NC}"
-    echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}${YELLOW}╚════════════════════════════════════════════════════════════════════════╝${NC}"
     echo
     
     # Check for TUI mode
@@ -591,15 +606,13 @@ EOF
         exit $?
     fi
     
-    # CLI Mode Selection - simplified and robust
+    # CLI Mode Selection - fixed loop
     if [[ "${non_interactive}" != "true" ]]; then
         echo -e "${BOLD}Select installation mode:${NC}"
         echo "  ${GREEN}1)${NC} CLI - Stable, production-ready (DEFAULT)"
         echo "  ${YELLOW}2)${NC} TUI - Terminal UI (Experimental, may have issues)"
         echo
         
-        local mode_choice=""
-        # Use a simple read without -p flag for better compatibility
         while true; do
             echo -n "Select mode [1]: "
             read -r mode_choice

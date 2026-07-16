@@ -336,13 +336,72 @@ prompt_missing_config() {
         read -rp "Enter Telegram User Bot Chat ID (group ID, negative number): " TELEGRAM_USER_CHAT_ID
         [[ -n "${TELEGRAM_USER_CHAT_ID}" ]] && save_config_var "TELEGRAM_USER_CHAT_ID" "${TELEGRAM_USER_CHAT_ID}" "${config_file}"
     fi
-    
+
     # TAILSCALE_AUTH_KEY
     if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
         read -rp "Enter Tailscale Auth Key (or press Enter for interactive login): " TAILSCALE_AUTH_KEY
         [[ -n "${TAILSCALE_AUTH_KEY}" ]] && save_config_var "TAILSCALE_AUTH_KEY" "${TAILSCALE_AUTH_KEY}" "${config_file}"
     fi
-    
+
+    # VPN_PROVIDER
+    if [[ -z "${VPN_PROVIDER:-}" ]]; then
+        echo
+        echo "Select VPN provider:"
+        echo "  1) Pangolin (https://pangolin.net/) - Recommended: MagicDNS, exit nodes, Pi-hole integration"
+        echo "  2) Tailscale (https://tailscale.com/) - Popular, mature, self-hostable (Headscale)"
+        echo "  3) Both - Run both VPNs simultaneously"
+        echo "  4) None - Skip VPN setup"
+        read -rp "Choice [1]: " vpn_choice
+        vpn_choice="${vpn_choice:-1}"
+        case "${vpn_choice}" in
+            1) VPN_PROVIDER="pangolin" ;;
+            2) VPN_PROVIDER="tailscale" ;;
+            3) VPN_PROVIDER="both" ;;
+            4) VPN_PROVIDER="none" ;;
+            *) VPN_PROVIDER="pangolin" ;;
+        esac
+        save_config_var "VPN_PROVIDER" "${VPN_PROVIDER}" "${config_file}"
+    fi
+
+    # PANGOLIN_AUTH_KEY
+    if [[ "${VPN_PROVIDER}" == "pangolin" || "${VPN_PROVIDER}" == "both" ]] && [[ -z "${PANGOLIN_AUTH_KEY:-}" ]]; then
+        read -rp "Enter Pangolin Auth Key (from https://pangolin.net/admin/settings/auth-keys, or press Enter for interactive login): " PANGOLIN_AUTH_KEY
+        [[ -n "${PANGOLIN_AUTH_KEY}" ]] && save_config_var "PANGOLIN_AUTH_KEY" "${PANGOLIN_AUTH_KEY}" "${config_file}"
+    fi
+
+    # PANGOLIN_EXIT_NODE
+    if [[ "${VPN_PROVIDER}" == "pangolin" || "${VPN_PROVIDER}" == "both" ]] && [[ -z "${PANGOLIN_EXIT_NODE:-}" ]]; then
+        read -rp "Advertise as exit node for Pangolin? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            PANGOLIN_EXIT_NODE="true"
+        else
+            PANGOLIN_EXIT_NODE="false"
+        fi
+        save_config_var "PANGOLIN_EXIT_NODE" "${PANGOLIN_EXIT_NODE}" "${config_file}"
+    fi
+
+    # OLLAMA_ENABLED
+    if [[ -z "${OLLAMA_ENABLED:-}" ]]; then
+        read -rp "Enable Ollama (Local LLM inference)? [Y/n] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            OLLAMA_ENABLED="false"
+        else
+            OLLAMA_ENABLED="true"
+        fi
+        save_config_var "OLLAMA_ENABLED" "${OLLAMA_ENABLED}" "${config_file}"
+    fi
+
+    # OLLAMA_MODELS
+    if [[ "${OLLAMA_ENABLED}" == "true" && -z "${OLLAMA_MODELS:-}" ]]; then
+        echo "Models to install (comma-separated). Leave empty for auto-detection based on hardware:"
+        echo "  Examples: llama3.2:3b,phi3:mini | mistral:7b | gemma2:2b,qwen2.5:1.5b"
+        read -rp "Models [auto]: " OLLAMA_MODELS
+        [[ -z "${OLLAMA_MODELS}" ]] && OLLAMA_MODELS="auto"
+        save_config_var "OLLAMA_MODELS" "${OLLAMA_MODELS}" "${config_file}"
+    fi
+
     # Reload config to pick up new values
     # shellcheck source=/dev/null
     source "${config_file}"
@@ -577,6 +636,10 @@ show_summary() {
                     ;;
                 n8n)
                     echo "    URL: http://${ip}:5678 (or http://n8n.home)"
+                    ;;
+                ollama)
+                    echo "    API: http://${ip}:11434"
+                    echo "    Models: $(sudo -u ollama ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ', ' | sed 's/, $//' || echo 'run: ollama list')"
                     ;;
             esac
             echo

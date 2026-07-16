@@ -17,17 +17,17 @@ readonly LOG_FILE="${LOG_DIR}/install_$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_DIR="/var/lib/${PROJECT_NAME}"
 readonly BACKUP_DIR="${STATE_DIR}/backups"
 
-# Colors (only if stdout is a terminal)
-if [[ -t 1 ]]; then
-    readonly RED='\033[0;31m'
-    readonly GREEN='\033[0;32m'
-    readonly YELLOW='\033[1;33m'
-    readonly BLUE='\033[0;34m'
-    readonly MAGENTA='\033[0;35m'
-    readonly CYAN='\033[0;36m'
-    readonly BOLD='\033[1m'
-    readonly DIM='\033[2m'
-    readonly NC='\033[0m'
+# Color detection - works with sudo and various terminals
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && command -v tput >/dev/null 2>&1 && tput colors >/dev/null 2>&1; then
+    readonly RED="$(tput setaf 1)"
+    readonly GREEN="$(tput setaf 2)"
+    readonly YELLOW="$(tput setaf 3)"
+    readonly BLUE="$(tput setaf 4)"
+    readonly MAGENTA="$(tput setaf 5)"
+    readonly CYAN="$(tput setaf 6)"
+    readonly BOLD="$(tput bold)"
+    readonly DIM="$(tput dim)"
+    readonly NC="$(tput sgr0)"
 else
     readonly RED='' GREEN='' YELLOW='' BLUE='' MAGENTA='' CYAN='' BOLD='' DIM='' NC=''
 fi
@@ -79,23 +79,29 @@ declare -A MODULE_SCRIPTS=(
     ["n8n"]="11-n8n.sh"
 )
 
-# TUI state
-TUI_MODE=false
-
 # ============================================================================
-# LOGGING FUNCTIONS
+# LOGGING FUNCTIONS (safe - won't fail if log dir missing)
 # ============================================================================
-log() {
-    local level="$1"; shift; local msg="$*"
+_log() {
+    local level="$1"; shift
+    local msg="$*"
     local timestamp; timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${timestamp} [${level}] ${msg}" | tee -a "${LOG_FILE}"
+    local output="${timestamp} [${level}] ${msg}"
+    
+    # Always print to stdout
+    echo -e "${output}"
+    
+    # Try to log to file if directory exists
+    if [[ -d "${LOG_DIR}" ]]; then
+        echo -e "${output}" >> "${LOG_FILE}" 2>/dev/null || true
+    fi
 }
 
-log_info()    { log "INFO"    "${BLUE}${*}${NC}"; }
-log_success() { log "SUCCESS" "${GREEN}${*}${NC}"; }
-log_warn()    { log "WARN"    "${YELLOW}${*}${NC}"; }
-log_error()   { log "ERROR"   "${RED}${*}${NC}"; }
-log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && log "DEBUG" "${DIM}${*}${NC}"; }
+log_info()    { _log "INFO"    "${BLUE}${*}${NC}"; }
+log_success() { _log "SUCCESS" "${GREEN}${*}${NC}"; }
+log_warn()    { _log "WARN"    "${YELLOW}${*}${NC}"; }
+log_error()   { _log "ERROR"   "${RED}${*}${NC}"; }
+log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && _log "DEBUG" "${DIM}${*}${NC}"; }
 
 # Progress indicator
 show_progress() {
@@ -133,9 +139,12 @@ check_arch() {
     log_info "Architecture: ${ARCH}"; export ARCH
 }
 
+# ============================================================================
+# CRITICAL: Run this FIRST to ensure log directory exists
+# ============================================================================
 setup_directories() {
     mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
-    chmod 750 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
+    chmod 750 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" 2>/dev/null || true
 }
 
 sanitize_config() {
@@ -146,7 +155,7 @@ sanitize_config() {
 
 load_config() {
     local config_file="$1"
-    [[ ! -f "${config_file}" ]] && die "Config file not found: ${config_file}\nCopy settings.conf.example to settings.conf"
+    [[ ! -f "${config_file}" ]] && die "Config file not found: ${config_file}\nCopy config/settings.conf.example to settings.conf"
     
     local perms; perms=$(stat -c "%a" "${config_file}" 2>/dev/null || stat -f "%A" "${config_file}" 2>/dev/null)
     [[ "${perms}" != "600" && "${perms}" != "400" ]] && { log_warn "Config permissions loose (${perms}), fixing to 600"; chmod 600 "${config_file}"; }
@@ -185,206 +194,7 @@ validate_config() {
 }
 
 # ============================================================================
-# TUI FUNCTIONS (whiptail/dialog)
-# ============================================================================
-check_tui_tool() {
-    if command -v dialog >/dev/null 2>&1; then
-        TUI_TOOL="dialog"
-        return 0
-    elif command -v whiptail >/dev/null 2>&1; then
-        TUI_TOOL="whiptail"
-        return 0
-    fi
-    return 1
-}
-
-install_tui_tool() {
-    log_info "Installing TUI tool (dialog)..."
-    apt-get update -qq && apt-get install -y -qq dialog
-}
-
-tui_show_welcome() {
-    local tool="$1"
-    $tool --title "Pi Server Setup v2 - EXPERIMENTAL" --msgbox \
-        "⚠️  WARNING: This is EXPERIMENTAL software.\n\n\
-Use CLI mode for stability and production use.\n\
-TUI/GUI modes may have issues and are for testing only.\n\n\
-Continue at your own risk." 12 70
-}
-
-tui_select_mode() {
-    local tool="$1"
-    local choice
-    choice=$($tool --title "Installation Mode" --menu \
-        "Select installation interface:\n\n\
-[1] CLI (Recommended) - Stable, production-ready\n\
-[2] TUI - Terminal UI (Experimental, may have issues)\n\n\
-Default: CLI (Press Enter for default)" \
-        15 70 2 \
-        "1" "CLI - Stable, production-ready (DEFAULT)" \
-        "2" "TUI - Terminal UI (Experimental)" \
-        3>&1 1>&2 2>&3)
-    echo "$choice"
-}
-
-tui_select_modules() {
-    local tool="$1"
-    local modules
-    modules=$($tool --title "Module Selection" --checklist \
-        "Select modules to install (Space to toggle, Enter to confirm):\n\n\
-Required modules are pre-selected and cannot be deselected." \
-        20 78 12 \
-        "system" "System Basics (Required)" ON \
-        "network" "Tailscale + Firewall + Fail2Ban" OFF \
-        "pihole" "Pi-hole DNS Ad-blocking" OFF \
-        "monitoring" "Prometheus + Grafana + Alertmanager" OFF \
-        "samba" "Samba + Webmin" OFF \
-        "utils" "Reports + Cron + Maintenance" OFF \
-        "telegram" "Dual Telegram Bot (Admin + User)" OFF \
-        "localsend" "LocalSend File Sharing" OFF \
-        "stirling" "Stirling-PDF" OFF \
-        "nginx" "Nginx Reverse Proxy (.home domains)" OFF \
-        "cockpit" "Cockpit Web Admin" OFF \
-        "n8n" "n8n Automation Engine" OFF \
-        3>&1 1>&2 2>&3)
-    echo "$modules"
-}
-
-tui_get_config() {
-    local tool="$1"
-    local config
-    config=$($tool --title "Configuration" --form \
-        "Enter required configuration (Tab to navigate, Enter to confirm):\n\n\
-Required fields marked with *." \
-        20 78 10 \
-        "PI_USER*"      1 1 "piadmin"     1 20 20 0 \
-        "SSH_PORT*"     2 1 "2222"        2 20 10 0 \
-        "PI_PASSWORD"   3 1 ""            3 20 30 0 \
-        "TELEGRAM_TOKEN" 4 1 ""          4 20 50 0 \
-        "TAILSCALE_KEY" 5 1 ""           5 20 50 0 \
-        "STATIC_IP"     6 1 ""            6 20 20 0 \
-        3>&1 1>&2 2>&3)
-    echo "$config"
-}
-
-tui_confirm_proceed() {
-    local tool="$1"
-    local modules="$2"
-    $tool --title "Confirm Installation" --yesno \
-        "Ready to install the following modules:\n\n$modules\n\n\
-Proceed with installation?" 15 70
-}
-
-tui_show_progress() {
-    local tool="$1"
-    local current="$2"
-    local total="$3"
-    local module="$4"
-    local pct=$((current * 100 / total))
-    $tool --title "Installing $module" --gauge \
-        "Installing $module ($current of $total)..." 8 70 "$pct"
-}
-
-tui_show_summary() {
-    local tool="$1"
-    local summary="$2"
-    $tool --title "Installation Complete" --msgbox \
-        "$summary" 20 70
-}
-
-run_tui_mode() {
-    # Check/install TUI tool
-    if ! check_tui_tool; then
-        log_info "TUI tool not found, installing dialog..."
-        install_tui_tool
-        check_tui_tool || die "Failed to install dialog/whiptail"
-    fi
-    
-    local tool="$TUI_TOOL"
-    
-    # Welcome
-    tui_show_welcome "$tool"
-    
-    # Mode already selected as TUI, proceed
-    log_info "Running in TUI mode (Experimental)"
-    
-    # Module selection
-    local selected_modules
-    selected_modules=$(tui_select_modules "$tool")
-    [[ -z "$selected_modules" ]] && die "No modules selected"
-    
-    # Convert space-separated to array
-    IFS=' ' read -ra MODULES_TO_INSTALL <<< "$selected_modules"
-    
-    # Config form
-    local config_output
-    config_output=$(tui_get_config "$tool")
-    IFS=$'\n' read -r PI_USER SSH_PORT PI_PASSWORD TELEGRAM_TOKEN TAILSCALE_KEY STATIC_IP <<< "$config_output"
-    
-    # Save to config
-    save_config_var "PI_USER" "$PI_USER" "$CONFIG_FILE"
-    save_config_var "SSH_PORT" "$SSH_PORT" "$CONFIG_FILE"
-    [[ -n "$PI_PASSWORD" ]] && save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"
-    [[ -n "$TELEGRAM_TOKEN" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "$TELEGRAM_TOKEN" "$CONFIG_FILE"
-    [[ -n "$TAILSCALE_KEY" ]] && save_config_var "TAILSCALE_AUTH_KEY" "$TAILSCALE_KEY" "$CONFIG_FILE"
-    [[ -n "$STATIC_IP" ]] && save_config_var "STATIC_IP" "$STATIC_IP" "$CONFIG_FILE"
-    
-    # Reload config
-    # shellcheck source=/dev/null
-    source "$CONFIG_FILE"
-    
-    # Generate passwords for empty fields
-    [[ -z "${PI_PASSWORD:-}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${PIHOLE_PASSWORD:-}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "PIHOLE_PASSWORD" "$PIHOLE_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${SMB_PASSWORD:-}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); save_config_var "SMB_PASSWORD" "$SMB_PASSWORD" "$CONFIG_FILE"; }
-    
-    # Confirm
-    local module_list=$(printf '%s\n' "${MODULES_TO_INSTALL[@]}")
-    tui_confirm_proceed "$tool" "$module_list" || die "Installation cancelled"
-    
-    # Resolve dependencies
-    resolve_dependencies MODULES_TO_INSTALL
-    
-    # Check already installed
-    local to_install=()
-    for module in "${MODULES_TO_INSTALL[@]}"; do
-        if check_module_installed "$module"; then
-            log_warn "Module $module appears already installed"
-            $tool --yesno "Module $module appears already installed. Reinstall?" 8 60 && to_install+=("$module")
-        else
-            to_install+=("$module")
-        fi
-    done
-    MODULES_TO_INSTALL=("${to_install[@]}")
-    [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
-    
-    # Execute with progress gauge
-    local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
-    for module in "${MODULES_TO_INSTALL[@]}"; do
-        ((current++))
-        tui_show_progress "$tool" "$current" "$total" "$module" &
-        local gauge_pid=$!
-        
-        if execute_module "$module"; then
-            log_success "Module $module completed"
-        else
-            log_error "Module $module failed"
-            failed+=("$module")
-        fi
-        kill $gauge_pid 2>/dev/null || true
-    done
-    
-    # Summary
-    local summary
-    summary=$(generate_summary)
-    tui_show_summary "$tool" "$summary"
-    
-    [[ ${#failed[@]} -gt 0 ]] && exit 1 || exit 0
-}
-
-# ============================================================================
-# INTERACTIVE CONFIGURATION PROMPTING (CLI)
+# INTERACTIVE CONFIGURATION PROMPTING
 # ============================================================================
 prompt_missing_config() {
     local config_file="$1"
@@ -478,7 +288,7 @@ prompt_missing_config() {
 
 save_config_var() {
     local var_name="$1" var_value="$2" config_file="$3"
-    local escaped_value; escaped_value=$(printf '%s\n' "${var_value}" | sed 's/[[\\.*^$()+?{|\\]/\\&/g')
+    local escaped_value; escaped_value=$(printf '%s\n' "${var_value}" | sed 's/[[\.*^$()+?{|\\]/\\&/g')
     if grep -q "^${var_name}=" "${config_file}"; then
         sed -i "s|^${var_name}=.*|${var_name}=\"${escaped_value}\"|" "${config_file}"
     else
@@ -597,8 +407,129 @@ generate_summary() {
     echo -e "$summary"
 }
 
-show_summary() {
-    generate_summary
+show_summary() { generate_summary; }
+
+# ============================================================================
+# TUI FUNCTIONS (whiptail/dialog) - only loaded if --tui flag used
+# ============================================================================
+check_tui_tool() {
+    if command -v dialog >/dev/null 2>&1; then TUI_TOOL="dialog"; return 0
+    elif command -v whiptail >/dev/null 2>&1; then TUI_TOOL="whiptail"; return 0
+    fi; return 1
+}
+
+install_tui_tool() {
+    log_info "Installing TUI tool (dialog)..."
+    apt-get update -qq && apt-get install -y -qq dialog
+}
+
+run_tui_mode() {
+    if ! check_tui_tool; then
+        log_info "TUI tool not found, installing dialog..."
+        install_tui_tool
+        check_tui_tool || die "Failed to install dialog/whiptail"
+    fi
+    
+    local tool="$TUI_TOOL"
+    
+    # Welcome
+    $tool --title "Pi Server Setup v2 - EXPERIMENTAL" --msgbox \
+        "⚠️  WARNING: This is EXPERIMENTAL software.\n\nUse CLI mode for stability and production use.\nTUI mode may have issues and is for testing only.\n\nContinue at your own risk." 12 70
+    
+    # Module selection
+    local selected_modules
+    selected_modules=$($tool --title "Module Selection" --checklist \
+        "Select modules to install (Space to toggle, Enter to confirm):\n\nRequired modules are pre-selected and cannot be deselected." \
+        20 78 12 \
+        "system" "System Basics (Required)" ON \
+        "network" "Tailscale + Firewall + Fail2Ban" OFF \
+        "pihole" "Pi-hole DNS Ad-blocking" OFF \
+        "monitoring" "Prometheus + Grafana + Alertmanager" OFF \
+        "samba" "Samba + Webmin" OFF \
+        "utils" "Reports + Cron + Maintenance" OFF \
+        "telegram" "Dual Telegram Bot (Admin + User)" OFF \
+        "localsend" "LocalSend File Sharing" OFF \
+        "stirling" "Stirling-PDF" OFF \
+        "nginx" "Nginx Reverse Proxy (.home domains)" OFF \
+        "cockpit" "Cockpit Web Admin" OFF \
+        "n8n" "n8n Automation Engine" OFF \
+        3>&1 1>&2 2>&3)
+    [[ -z "$selected_modules" ]] && die "No modules selected"
+    IFS=' ' read -ra MODULES_TO_INSTALL <<< "$selected_modules"
+    
+    # Config form
+    local config_output
+    config_output=$($tool --title "Configuration" --form \
+        "Enter required configuration (Tab to navigate, Enter to confirm):\n\nRequired fields marked with *." \
+        20 78 10 \
+        "PI_USER*"      1 1 "piadmin"     1 20 20 0 \
+        "SSH_PORT*"     2 1 "2222"        2 20 10 0 \
+        "PI_PASSWORD"   3 1 ""            3 20 30 0 \
+        "TELEGRAM_TOKEN" 4 1 ""          4 20 50 0 \
+        "TAILSCALE_KEY" 5 1 ""           5 20 50 0 \
+        "STATIC_IP"     6 1 ""            6 20 20 0 \
+        3>&1 1>&2 2>&3)
+    IFS=$'\n' read -r PI_USER SSH_PORT PI_PASSWORD TELEGRAM_TOKEN TAILSCALE_KEY STATIC_IP <<< "$config_output"
+    
+    save_config_var "PI_USER" "$PI_USER" "$CONFIG_FILE"
+    save_config_var "SSH_PORT" "$SSH_PORT" "$CONFIG_FILE"
+    [[ -n "$PI_PASSWORD" ]] && save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"
+    [[ -n "$TELEGRAM_TOKEN" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "$TELEGRAM_TOKEN" "$CONFIG_FILE"
+    [[ -n "$TAILSCALE_KEY" ]] && save_config_var "TAILSCALE_AUTH_KEY" "$TAILSCALE_KEY" "$CONFIG_FILE"
+    [[ -n "$STATIC_IP" ]] && save_config_var "STATIC_IP" "$STATIC_IP" "$CONFIG_FILE"
+    
+    # Reload config
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+    
+    # Generate passwords for empty fields
+    [[ -z "${PI_PASSWORD:-}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random password for ${PI_USER}"; save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Grafana password"; save_config_var "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${PIHOLE_PASSWORD:-}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Pi-hole password"; save_config_var "PIHOLE_PASSWORD" "$PIHOLE_PASSWORD" "$CONFIG_FILE"; }
+    [[ -z "${SMB_PASSWORD:-}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Samba password"; save_config_var "SMB_PASSWORD" "$SMB_PASSWORD" "$CONFIG_FILE"; }
+    
+    # Confirm
+    local module_list=$(printf '%s\n' "${MODULES_TO_INSTALL[@]}")
+    $tool --title "Confirm Installation" --yesno "Ready to install the following modules:\n\n$module_list\n\nProceed with installation?" 15 70 || die "Installation cancelled"
+    
+    # Resolve dependencies
+    resolve_dependencies MODULES_TO_INSTALL
+    
+    # Check already installed
+    local to_install=()
+    for module in "${MODULES_TO_INSTALL[@]}"; do
+        if check_module_installed "$module"; then
+            log_warn "Module $module appears already installed"
+            $tool --yesno "Module $module appears already installed. Reinstall?" 8 60 && to_install+=("$module")
+        else
+            to_install+=("$module")
+        fi
+    done
+    MODULES_TO_INSTALL=("${to_install[@]}")
+    [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
+    
+    # Execute with progress gauge
+    local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
+    for module in "${MODULES_TO_INSTALL[@]}"; do
+        ((current++))
+        $tool --title "Installing $module" --gauge "Installing $module ($current of $total)..." 8 70 $((current * 100 / total)) &
+        local gauge_pid=$!
+        
+        if execute_module "$module"; then
+            log_success "Module $module completed"
+        else
+            log_error "Module $module failed"
+            failed+=("$module")
+        fi
+        kill $gauge_pid 2>/dev/null || true
+    done
+    
+    # Summary
+    local summary
+    summary=$(generate_summary)
+    $tool --title "Installation Complete" --msgbox "$summary" 20 70
+    
+    [[ ${#failed[@]} -gt 0 ]] && exit 1 || exit 0
 }
 
 # ============================================================================
@@ -606,6 +537,7 @@ show_summary() {
 # ============================================================================
 main() {
     local config_file="${CONFIG_FILE_DEFAULT}" modules_arg="" non_interactive=false dry_run=false repair_mode=false uninstall_mode=false
+    TUI_MODE=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -626,7 +558,7 @@ Options:
   --repair           Attempt to repair broken installations
   --uninstall        Uninstall modules
   --tui              Terminal UI mode (Experimental)
-  --gui              Web GUI mode (Experimental)
+  --gui              Web GUI mode (Not yet implemented)
 
 Available modules: $(printf '%s, ' "${MODULES[@]}" | sed 's/:.*//g' | sed 's/, $//')
 
@@ -649,20 +581,20 @@ EOF
     done
     
     # Experimental warning
-    echo -e "${BOLD}${YELLOW}╔══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
-    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.      ║${NC}"
-    echo -e "${BOLD}${YELLOW}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                      ║${NC}"
+    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.          ║${NC}"
+    echo -e "${BOLD}${YELLOW}╚═══════════════════════════════════════════════════════════════════╝${NC}"
     echo
     
-    # Check for TUI mode
+    # Run TUI mode if requested
     if [[ "${TUI_MODE}" == "true" ]]; then
         log_info "Starting in TUI mode (Experimental)"
         run_tui_mode
         exit $?
     fi
     
-    # CLI Mode Selection
+    # CLI Mode Selection (default to CLI)
     if [[ "${non_interactive}" != "true" ]]; then
         echo -e "${BOLD}Select installation mode:${NC}"
         echo "  ${GREEN}1)${NC} CLI - Stable, production-ready (DEFAULT)"

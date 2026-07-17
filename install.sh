@@ -142,6 +142,11 @@ check_root() {
 }
 
 check_os() {
+    if [[ "${SKIP_OS_CHECK:-false}" == "true" ]]; then
+        log_info "Skipping OS check (--skip-os-check specified)"
+        return 0
+    fi
+    
     if [[ ! -f /etc/os-release ]]; then
         die "Cannot determine OS version"
     fi
@@ -684,6 +689,7 @@ Options:
   --dry-run          Validate configuration without making changes
   --repair           Attempt to repair broken installations
   --uninstall        Uninstall specific modules or everything
+  --skip-os-check    Skip OS/distribution check (for testing/dry-run on non-Debian)
 
 Available modules: $(printf '%s\n' "${MODULES[@]}" | cut -d: -f1 | paste -sd, -)
 
@@ -699,26 +705,36 @@ EOF
             --dry-run) dry_run=true ;;
             --repair) repair_mode=true ;;
             --uninstall) uninstall_mode=true ;;
+            --skip-os-check) SKIP_OS_CHECK=true ;;
             *) die "Unknown option: $1" ;;
         esac
         shift
     done
     
     # Setup - ensure basic tools first
+    # Create directories FIRST before any logging
+    setup_directories
+    
     check_root
     
     # Ensure basic tools are available before proceeding
-    local required_base_tools=(curl wget gpg apt-get systemctl)
+    # Note: apt-get is the package manager itself, not installable via apt
+    local required_base_tools=(curl wget gpg systemctl)
     for tool in "${required_base_tools[@]}"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             log_warn "Required tool '$tool' not found, attempting to install..."
-            apt-get update -qq && apt-get install -y -qq "$tool" 2>/dev/null || true
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get update -qq && apt-get install -y -qq "$tool" 2>/dev/null || true
+            elif command -v pacman >/dev/null 2>&1; then
+                pacman -Sy --noconfirm "$tool" 2>/dev/null || true
+            elif command -v dnf >/dev/null 2>&1; then
+                dnf install -y "$tool" 2>/dev/null || true
+            fi
         fi
     done
     
     check_os
     check_arch
-    setup_directories
     
     log_info "Starting ${PROJECT_NAME} v${SCRIPT_VERSION}"
     log_info "Log file: ${LOG_FILE}"

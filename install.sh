@@ -608,7 +608,7 @@ show_summary() {
                     echo "    VNC:     ${ip}:5900"
                     ;;
                 network)
-                    echo "    Tailscale: Connected"
+                    echo "    VPN:     Connected (Tailscale/Pangolin)"
                     ;;
                 pihole)
                     echo "    Web UI:  http://${ip}/admin"

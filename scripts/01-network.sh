@@ -7,62 +7,54 @@ set -euo pipefail
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh" 2>/dev/null || true
-
-# Colors
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m'
-
-log_info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
-log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
+source "${SCRIPT_DIR}/../lib/platform.sh" 2>/dev/null || true
 
 # Configuration variables
 TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 TAILSCALE_EXIT_NODE="${TAILSCALE_EXIT_NODE:-false}"
+TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-}"
+TAILSCALE_INSTALL_URL="https://tailscale.com/install.sh"
+
 STATIC_IP="${STATIC_IP:-}"
 STATIC_GATEWAY="${STATIC_GATEWAY:-}"
 STATIC_DNS="${STATIC_DNS:-1.1.1.1}"
 
 main() {
     log_info "Starting Network setup..."
-    
+
     # Detect platform
     detect_platform
-    
+
     # 1. Install and configure Tailscale
     setup_tailscale
-    
+
     # 2. Configure Static IP (optional, with warnings)
     configure_static_ip
-    
+
     # 3. Configure MagicDNS / Global Nameservers (if Tailscale is active)
     configure_tailscale_dns
-    
+
     log_success "Network setup completed!"
 }
 
 setup_tailscale() {
     log_info "Setting up Tailscale..."
-    
+
     # Install Tailscale if not present
-    if ! command -v tailscale >/dev/null 2>&1; then
+    if ! command_exists tailscale; then
         log_info "Installing Tailscale..."
         curl -fsSL https://tailscale.com/install.sh | sh
     else
         log_info "Tailscale already installed"
     fi
-    
+
     # Check if already connected
     if tailscale status >/dev/null 2>&1; then
-        log_info "Tailscale is already connected"
         local ts_ip
         ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
+        log_info "Tailscale is already connected"
         log_info "Tailscale IP: ${ts_ip}"
-        
+
         if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
             read -rp "Re-authenticate Tailscale? [y/N] " -n 1 -r
             echo
@@ -72,16 +64,16 @@ setup_tailscale() {
         fi
         tailscale logout
     fi
-    
+
     # Prepare tailscale up arguments
     local ts_args=()
-    
+
     # Exit node
     if [[ "${TAILSCALE_EXIT_NODE}" == "true" ]]; then
         ts_args+=("--advertise-exit-node")
         log_info "Will advertise as exit node"
     fi
-    
+
     # Advertise routes for local subnet
     local lan_subnet
     lan_subnet=$(ip route | grep -E '^192\.168|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.' | head -1 | awk '{print $1}')
@@ -89,24 +81,30 @@ setup_tailscale() {
         ts_args+=("--advertise-routes=${lan_subnet}")
         log_info "Will advertise route: ${lan_subnet}"
     fi
-    
+
+    # Custom hostname
+    if [[ -n "${TAILSCALE_HOSTNAME}" ]]; then
+        ts_args+=("--hostname=${TAILSCALE_HOSTNAME}")
+        log_info "Using custom hostname: ${TAILSCALE_HOSTNAME}"
+    fi
+
     # Authenticate
     if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
-        log_info "Authenticating with provided auth key..."
+        log_info "Authenticating with auth key..."
         tailscale up "${ts_args[@]}" --authkey="${TAILSCALE_AUTH_KEY}"
     else
-        log_info "No auth key provided. Starting interactive login..."
+        log_info "Starting interactive authentication..."
         echo "A browser window will open for authentication."
         tailscale up "${ts_args[@]}"
     fi
-    
+
     # Verify connection
     sleep 3
     if tailscale status >/dev/null 2>&1; then
         local ts_ip
         ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
         log_success "Tailscale connected! IP: ${ts_ip}"
-        
+
         if [[ "${TAILSCALE_EXIT_NODE}" == "true" ]]; then
             log_warn "IMPORTANT: Enable exit node in Tailscale admin console:"
             log_warn "  https://login.tailscale.com/admin/machines"
@@ -122,17 +120,17 @@ configure_tailscale_dns() {
     if ! tailscale status >/dev/null 2>&1; then
         return 0
     fi
-    
+
     log_info "Configuring Tailscale DNS (MagicDNS + Global Nameservers)..."
-    
+
     local ts_ip
     ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
-    
+
     if [[ -z "${ts_ip}" ]]; then
         log_warn "Could not determine Tailscale IP, skipping DNS config"
         return 0
     fi
-    
+
     # Note: These settings must be configured in the Tailscale admin console
     # We can only provide guidance here
     cat <<EOF
@@ -154,59 +152,59 @@ configure_static_ip() {
         log_info "Static IP not configured in settings, skipping..."
         return 0
     fi
-    
-    log_warn "================================================================"
+
+    log_warn "=================================================================="
     log_warn "WARNING: Configuring static IP remotely can disconnect you!"
     log_warn "It is STRONGLY recommended to set a DHCP reservation in your"
     log_warn "router instead of configuring static IP on the device."
-    log_warn "================================================================"
-    
+    log_warn "=================================================================="
+
     if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
         read -rp "Are you sure you want to configure static IP on this device? [y/N] " -n 1 -r
         echo
         [[ ! $REPLY =~ ^[Yy]$ ]] && { log_info "Skipping static IP configuration"; return 0; }
     fi
-    
+
     log_info "Configuring static IP: ${STATIC_IP}"
-    
+
     # Determine interface
     local interface
     interface=$(ip route | grep default | awk '{print $5}' | head -1)
     if [[ -z "${interface}" ]]; then
         interface="eth0"
     fi
-    
+
     # Parse CIDR
     local ip_addr="${STATIC_IP%%/*}"
     local cidr="${STATIC_IP#*/}"
     [[ "${cidr}" == "${STATIC_IP}" ]] && cidr="24"
-    
+
     # Gateway
     local gateway="${STATIC_GATEWAY}"
     if [[ -z "${gateway}" ]]; then
         gateway=$(ip route | grep default | awk '{print $3}' | head -1)
     fi
-    
+
     # DNS
     local dns="${STATIC_DNS}"
-    
+
     log_info "Interface: ${interface}"
     log_info "IP: ${ip_addr}/${cidr}"
     log_info "Gateway: ${gateway}"
     log_info "DNS: ${dns}"
-    
+
     if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
         read -rp "Confirm these settings? [y/N] " -n 1 -r
         echo
         [[ ! $REPLY =~ ^[Yy]$ ]] && { log_info "Cancelled"; return 0; }
     fi
-    
+
     # Backup dhcpcd.conf
     cp /etc/dhcpcd.conf "/etc/dhcpcd.conf.bak.$(date +%Y%m%d_%H%M%S)"
-    
+
     # Remove any existing static config for this interface
     sed -i "/^interface ${interface}$/,/^$/d" /etc/dhcpcd.conf
-    
+
     # Append new configuration
     cat >> /etc/dhcpcd.conf <<EOF
 
@@ -216,7 +214,7 @@ static ip_address=${ip_addr}/${cidr}
 static routers=${gateway}
 static domain_name_servers=${dns}
 EOF
-    
+
     log_success "Static IP configured. Reboot required to take effect."
     log_warn "You may lose connection after reboot if settings are incorrect!"
 }

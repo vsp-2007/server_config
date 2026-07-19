@@ -95,7 +95,7 @@ log_info()    { _log "INFO"    "${BLUE}${*}${NC}"; }
 log_success() { _log "SUCCESS" "${GREEN}${*}${NC}"; }
 log_warn()    { _log "WARN"    "${YELLOW}${*}${NC}"; }
 log_error()   { _log "ERROR"   "${RED}${*}${NC}"; }
-log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && _log "DEBUG" "${DIM}${*}${NC}"; }
+log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && _log "DEBUG" "${DIM}${*}${NC}" || true; }
 
 # Progress indicator
 show_progress() {
@@ -298,9 +298,9 @@ save_config_var() {
 # MODULE SELECTION (CLI)
 # ============================================================================
 select_modules() {
-    local selected_modules="$1" interactive="${2:-true}"
+    local selected_modules="$1" non_interactive="${2:-false}"
     [[ -n "${selected_modules}" ]] && { IFS=',' read -ra MODULES_TO_INSTALL <<< "${selected_modules}"; return 0; }
-    [[ "${interactive}" != "true" ]] && { MODULES_TO_INSTALL=($(printf '%s\n' "${MODULES[@]}" | cut -d':' -f1)); return 0; }
+    [[ "${non_interactive}" != "false" ]] && { MODULES_TO_INSTALL=($(printf '%s\n' "${MODULES[@]}" | cut -d':' -f1)); return 0; }
     
     echo -e "\n${BOLD}Select modules to install:${NC}"
     echo "Enter comma-separated numbers (e.g., 1,3,5) or 'all' for everything."
@@ -373,14 +373,7 @@ execute_module() {
     log_info "Executing module: ${module} (${script_name})"
     chmod +x "${script_path}"
     set -a; source "${CONFIG_FILE}"; set +a
-    if "${script_path}"; then 
-        log_success "Module ${module} completed"
-        mark_module_installed "${module}"
-        return 0
-    else 
-        log_error "Module ${module} failed"
-        return $?
-    fi
+    if "${script_path}"; then log_success "Module ${module} completed"; mark_module_installed "${module}"; return 0; else log_error "Module ${module} failed"; return $?; fi
 }
 
 show_summary() {
@@ -457,7 +450,7 @@ Options:
   --uninstall            Uninstall modules
   --skip-os-check        Skip OS/distribution check (for testing/dry-run on non-Debian)
 
-Available modules: system, network, pihole, monitoring, samba, utils, telegram, localsend, stirling, nginx, cockpit, n8n
+Available modules: $(printf '%s, ' "${MODULES[@]}" | sed 's/:.*//g' | sed 's/, $//')
 
 Examples:
   sudo ./install.sh                          # Interactive full install
@@ -544,15 +537,7 @@ EOF
     local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
         ((current++)); show_progress "${current}" "${total}" "${module}"; echo
-        if execute_module "${module}"; then 
-            log_success "Module ${module} completed"
-        else 
-            log_error "Module ${module} failed"
-            failed+=("${module}")
-            [[ "${non_interactive}" == "true" ]] && die "Module ${module} failed in non-interactive mode"
-            read -rp "Continue? [Y/n] " -n 1 -r; echo
-            [[ ! $REPLY =~ ^[Yy]$ ]] && break
-        fi
+        if execute_module "${module}"; then log_success "Module ${module} completed"; else log_error "Module ${module} failed"; failed+=("${module}"); [[ "${non_interactive}" == "true" ]] && die "Module ${module} failed in non-interactive mode"; read -rp "Continue? [Y/n] " -n 1 -r; echo; [[ ! $REPLY =~ ^[Yy]$ ]] && break; fi
     done
     show_summary
     [[ ${#failed[@]} -gt 0 ]] && { log_warn "Failed modules: ${failed[*]}"; exit 1; }

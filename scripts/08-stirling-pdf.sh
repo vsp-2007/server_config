@@ -28,7 +28,7 @@ JAR_NAME="Stirling-PDF.jar"
 
 main() {
     log_info "Starting Stirling-PDF setup..."
-    
+
     detect_arch
     install_dependencies
     configure_swap
@@ -39,7 +39,7 @@ main() {
     install_systemd_service
     create_desktop_shortcut
     configure_firewall
-    
+
     log_success "Stirling-PDF setup completed!"
 }
 
@@ -67,15 +67,15 @@ detect_arch() {
 
 install_dependencies() {
     log_info "Installing dependencies (Java 21, LibreOffice, Tesseract, Python)..."
-    
+
     apt-get update -qq
-    
+
     # Try Java 21 first, fallback to 17
     if ! apt-get install -y -qq openjdk-21-jdk 2>/dev/null; then
         log_warn "OpenJDK 21 not available, trying 17..."
         apt-get install -y -qq openjdk-17-jdk
     fi
-    
+
     # Core dependencies
     apt-get install -y -qq \
         libreoffice-writer libreoffice-calc libreoffice-impress \
@@ -84,21 +84,21 @@ install_dependencies() {
         ca-certificates curl gnupg wget \
         dphys-swapfile \
         fontconfig fonts-dejavu-core fonts-liberation2
-    
+
     # Verify Java
     java -version 2>&1 | head -1
-    
+
     log_success "Dependencies installed"
 }
 
 configure_swap() {
     log_info "Configuring swap for Java workloads..."
-    
+
     if [[ -f /etc/dphys-swapfile ]]; then
         local current_swap
         current_swap=$(grep "^CONF_SWAPSIZE=" /etc/dphys-swapfile | cut -d= -f2)
         current_swap=${current_swap:-0}
-        
+
         if [[ "${current_swap}" -lt 2048 ]]; then
             log_info "Increasing swap to 2GB (was ${current_swap}MB)..."
             sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
@@ -112,7 +112,7 @@ configure_swap() {
 
 create_service_user() {
     log_info "Creating service user: ${USER_NAME}"
-    
+
     if ! id "${USER_NAME}" &>/dev/null; then
         useradd -r -s /bin/false -d "${APP_DIR}" -c "Stirling-PDF Service" "${USER_NAME}"
     fi
@@ -120,7 +120,7 @@ create_service_user() {
 
 setup_directories() {
     log_info "Setting up application directories..."
-    
+
     mkdir -p "${APP_DIR}"/{logs,configs,customFiles,tempFiles}
     chown -R "${USER_NAME}:${USER_NAME}" "${APP_DIR}"
     chmod 750 "${APP_DIR}"
@@ -128,19 +128,19 @@ setup_directories() {
 
 download_application() {
     log_info "Downloading Stirling-PDF v${STIRLING_PDF_VERSION}..."
-    
+
     cd /tmp
     local url="https://github.com/Stirling-Tools/Stirling-PDF/releases/download/v${STIRLING_PDF_VERSION}/Stirling-PDF.jar"
-    
+
     # Stop service if running
     systemctl stop stirling-pdf 2>/dev/null || true
-    
+
     # Download with validation
     if ! wget -q -O "${APP_DIR}/${JAR_NAME}.tmp" "${url}"; then
         log_error "Failed to download Stirling-PDF"
         return 1
     fi
-    
+
     # Validate file size (should be > 50MB for v2.4.5)
     local file_size
     file_size=$(stat -c%s "${APP_DIR}/${JAR_NAME}.tmp")
@@ -149,17 +149,17 @@ download_application() {
         rm -f "${APP_DIR}/${JAR_NAME}.tmp"
         return 1
     fi
-    
+
     mv "${APP_DIR}/${JAR_NAME}.tmp" "${APP_DIR}/${JAR_NAME}"
     chown "${USER_NAME}:${USER_NAME}" "${APP_DIR}/${JAR_NAME}"
     chmod 644 "${APP_DIR}/${JAR_NAME}"
-    
+
     log_success "Stirling-PDF JAR downloaded and validated (${file_size} bytes)"
 }
 
 configure_application() {
     log_info "Configuring Stirling-PDF (no-login mode, optimized for Pi)..."
-    
+
     # Create settings.yml with security and performance settings
     cat > "${APP_DIR}/settings.yml" <<EOF
 security:
@@ -172,14 +172,14 @@ system:
   # Disable heavy features for Pi optimization
   enableAlphaFunctionality: false
   enableBetaFunctionality: false
-  
+
   # Locale
   defaultLocale: en-US
-  
+
   # File handling
   maxFileSize: 100MB
   maxFiles: 10
-  
+
   # Cleanup
   cleanupCron: "0 3 * * *"
   cleanupMaxAge: 24h
@@ -195,16 +195,16 @@ pdf:
   imageDpi: 150
   jpegQuality: 0.8
 EOF
-    
+
     chown "${USER_NAME}:${USER_NAME}" "${APP_DIR}/settings.yml"
     chmod 640 "${APP_DIR}/settings.yml"
-    
+
     log_success "Application configured"
 }
 
 install_systemd_service() {
     log_info "Installing systemd service..."
-    
+
     cat > /etc/systemd/system/stirling-pdf.service <<EOF
 [Unit]
 Description=Stirling-PDF Service
@@ -251,7 +251,7 @@ ProtectControlGroups=yes
 RestrictRealtime=yes
 RestrictNamespaces=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
+# MemoryDenyWriteExecute=yes - DISABLED: breaks JVM JIT compilation
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 
@@ -264,11 +264,11 @@ CPUQuota=100%
 [Install]
 WantedBy=multi-user.target
 EOF
-    
+
     systemctl daemon-reload
     systemctl enable stirling-pdf
     systemctl restart stirling-pdf
-    
+
     # Wait and verify
     sleep 10
     if systemctl is-active --quiet stirling-pdf; then
@@ -283,10 +283,10 @@ EOF
 
 create_desktop_shortcut() {
     log_info "Creating desktop shortcut..."
-    
+
     local desktop_dir="/home/${PI_USER}/Desktop"
     [[ -d "${desktop_dir}" ]] || desktop_dir="/home/${PI_USER}"
-    
+
     if [[ -d "${desktop_dir}" ]]; then
         cat > "${desktop_dir}/Stirling-PDF.desktop" <<EOF
 [Desktop Entry]

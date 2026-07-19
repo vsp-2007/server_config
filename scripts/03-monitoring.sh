@@ -15,7 +15,7 @@ log_info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
-log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && echo -e "${NC}[DEBUG]${NC} $*"; }
+log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && echo -e "${NC}[DEBUG]${NC} $*" || true; }
 
 # Configuration with version pinning (updated to latest stable as of 2025)
 PROMETHEUS_VERSION="${PROMETHEUS_VERSION:-2.54.1}"
@@ -61,36 +61,36 @@ detect_arch() {
 
 main() {
     log_info "Starting Monitoring Stack setup..."
-    
+
     detect_arch
-    
+
     # 1. Create service users
     create_service_users
-    
+
     # 2. Install Node Exporter
     install_node_exporter
-    
+
     # 3. Install Prometheus
     install_prometheus
-    
+
     # 4. Install Alertmanager
     install_alertmanager
-    
-    # 5. Install Grafana
+
+    # 4. Install Grafana
     install_grafana
-    
-    # 6. Configure provisioning
+
+    # 5. Configure provisioning
     configure_grafana_provisioning
-    
-    # 7. Configure firewall
+
+    # 5. Configure firewall
     configure_firewall
-    
+
     log_success "Monitoring Stack setup completed!"
 }
 
 create_service_users() {
     log_info "Creating service users..."
-    
+
     local users=("prometheus" "node_exporter" "alertmanager")
     for user in "${users[@]}"; do
         if ! id "${user}" &>/dev/null; then
@@ -100,7 +100,7 @@ create_service_users() {
             log_info "User ${user} already exists"
         fi
     done
-    
+
     # Create directories
     mkdir -p /etc/prometheus /var/lib/prometheus /etc/alertmanager /var/lib/alertmanager
     chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
@@ -109,25 +109,25 @@ create_service_users() {
 
 install_node_exporter() {
     log_info "Installing Node Exporter v${NODE_EXPORTER_VERSION}..."
-    
+
     if [[ -f /usr/local/bin/node_exporter ]] && /usr/local/bin/node_exporter --version 2>&1 | grep -q "${NODE_EXPORTER_VERSION}"; then
         log_info "Node Exporter ${NODE_EXPORTER_VERSION} already installed"
     else
         cd /tmp
         local url="https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.${NODE_ARCH}.tar.gz"
         log_info "Downloading from: ${url}"
-        
+
         curl -fsSL -o node_exporter.tar.gz "${url}"
         tar xzf node_exporter.tar.gz
         cp "node_exporter-${NODE_EXPORTER_VERSION}.${NODE_ARCH}/node_exporter" /usr/local/bin/
         rm -rf node_exporter*
     fi
-    
+
     # Install systemd service
     install -m 644 "${SCRIPT_DIR}/../systemd/node_exporter.service" /etc/systemd/system/
     systemctl daemon-reload
     systemctl enable --now node_exporter
-    
+
     # Verify
     sleep 2
     if systemctl is-active --quiet node_exporter; then
@@ -141,36 +141,36 @@ install_node_exporter() {
 
 install_prometheus() {
     log_info "Installing Prometheus v${PROMETHEUS_VERSION}..."
-    
+
     if [[ -f /usr/local/bin/prometheus ]] && /usr/local/bin/prometheus --version 2>&1 | grep -q "${PROMETHEUS_VERSION}"; then
         log_info "Prometheus ${PROMETHEUS_VERSION} already installed"
     else
         cd /tmp
         local url="https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.${PROM_ARCH}.tar.gz"
         log_info "Downloading from: ${url}"
-        
+
         curl -fsSL -o prometheus.tar.gz "${url}"
         tar xzf prometheus.tar.gz
         cp "prometheus-${PROMETHEUS_VERSION}.${PROM_ARCH}/prometheus" /usr/local/bin/
         cp "prometheus-${PROMETHEUS_VERSION}.${PROM_ARCH}/promtool" /usr/local/bin/
         rm -rf prometheus*
     fi
-    
+
     # Copy config files
     install -m 644 "${SCRIPT_DIR}/../config/prometheus.yml" /etc/prometheus/
     install -m 644 "${SCRIPT_DIR}/../config/alert_rules.yml" /etc/prometheus/
     chown -R prometheus:prometheus /etc/prometheus
-    
+
     # Install systemd service
     install -m 644 "${SCRIPT_DIR}/../systemd/prometheus.service" /etc/systemd/system/
-    
+
     # Update service with version-specific args
     sed -i "s|__PROMETHEUS_RETENTION__|${PROMETHEUS_RETENTION}|g" /etc/systemd/system/prometheus.service
     sed -i "s|__PROMETHEUS_RETENTION_SIZE__|${PROMETHEUS_RETENTION_SIZE}|g" /etc/systemd/system/prometheus.service
-    
+
     systemctl daemon-reload
     systemctl enable --now prometheus
-    
+
     # Verify
     sleep 3
     if systemctl is-active --quiet prometheus; then
@@ -184,29 +184,29 @@ install_prometheus() {
 
 install_alertmanager() {
     log_info "Installing Alertmanager v${ALERTMANAGER_VERSION}..."
-    
+
     if [[ -f /usr/local/bin/alertmanager ]] && /usr/local/bin/alertmanager --version 2>&1 | grep -q "${ALERTMANAGER_VERSION}"; then
         log_info "Alertmanager ${ALERTMANAGER_VERSION} already installed"
     else
         cd /tmp
         local url="https://github.com/prometheus/alertmanager/releases/download/v${ALERTMANAGER_VERSION}/alertmanager-${ALERTMANAGER_VERSION}.${ALERT_ARCH}.tar.gz"
         log_info "Downloading from: ${url}"
-        
+
         curl -fsSL -o alertmanager.tar.gz "${url}"
         tar xzf alertmanager.tar.gz
         cp "alertmanager-${ALERTMANAGER_VERSION}.${ALERT_ARCH}/alertmanager" /usr/local/bin/
         cp "alertmanager-${ALERTMANAGER_VERSION}.${ALERT_ARCH}/amtool" /usr/local/bin/
         rm -rf alertmanager*
     fi
-    
+
     # Configure Alertmanager
     configure_alertmanager
-    
+
     # Install systemd service
     install -m 644 "${SCRIPT_DIR}/../systemd/alertmanager.service" /etc/systemd/system/
     systemctl daemon-reload
     systemctl enable --now alertmanager
-    
+
     # Verify
     sleep 2
     if systemctl is-active --quiet alertmanager; then
@@ -220,13 +220,13 @@ install_alertmanager() {
 
 configure_alertmanager() {
     log_info "Configuring Alertmanager..."
-    
+
     local config_file="/etc/alertmanager/alertmanager.yml"
-    
+
     # Check if we have Telegram credentials
     if [[ -n "${TELEGRAM_ADMIN_TOKEN:-}" && -n "${TELEGRAM_ADMIN_CHAT_ID:-}" ]]; then
         log_info "Configuring Alertmanager with Telegram notifications..."
-        
+
         cat > "${config_file}" <<EOF
 global:
   resolve_timeout: 5m
@@ -277,61 +277,61 @@ receivers:
   - url: 'http://127.0.0.1:5001/'
 EOF
     fi
-    
+
     chown alertmanager:alertmanager "${config_file}"
     chmod 640 "${config_file}"
 }
 
 install_grafana() {
     log_info "Installing Grafana v${GRAFANA_VERSION}..."
-    
+
     if command -v grafana-server >/dev/null 2>&1; then
         local installed_version
         installed_version=$(grafana-server -v 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
         log_info "Grafana ${installed_version} already installed"
-        
+
         # Still ensure it's configured properly
         configure_grafana
         return 0
     fi
-    
-    # Install dependencies
-    apt-get install -y -qq apt-transport-https software-properties-common wget libfontconfig1 musl
-    
+
+    # Install dependencies - use gpg instead of software-properties-common
+    apt-get install -y -qq apt-transport-https gpg wget libfontconfig1 musl
+
     # Add Grafana repository
     mkdir -p /etc/apt/keyrings/
     rm -f /tmp/grafana.key
     wget -q -O /tmp/grafana.key https://apt.grafana.com/gpg.key
     cat /tmp/grafana.key | gpg --dearmor | tee /etc/apt/keyrings/grafana.gpg > /dev/null
     echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | tee /etc/apt/sources.list.d/grafana.list
-    
+
     apt-get update -qq
     apt-get install -y -qq grafana="${GRAFANA_VERSION}"
-    
+
     configure_grafana
 }
 
 configure_grafana() {
     log_info "Configuring Grafana..."
-    
+
     # Ensure config directory
     mkdir -p /etc/grafana
-    
+
     # Bind to all interfaces
     if [[ -f /etc/grafana/grafana.ini ]]; then
         sed -i 's/^;http_addr =.*/http_addr = 0.0.0.0/' /etc/grafana/grafana.ini
         sed -i 's/^http_addr =.*/http_addr = 0.0.0.0/' /etc/grafana/grafana.ini
     fi
-    
+
     # Set admin user if not default
     if [[ "${GRAFANA_ADMIN_USER}" != "admin" ]]; then
         sed -i "s/^;admin_user =.*/admin_user = ${GRAFANA_ADMIN_USER}/" /etc/grafana/grafana.ini
         sed -i "s/^admin_user =.*/admin_user = ${GRAFANA_ADMIN_USER}/" /etc/grafana/grafana.ini
     fi
-    
+
     # Stop service to safely reset password
     systemctl stop grafana-server 2>/dev/null || true
-    
+
     # Reset admin password if provided
     if [[ -n "${GRAFANA_ADMIN_PASSWORD}" ]]; then
         log_info "Setting Grafana admin password..."
@@ -339,33 +339,41 @@ configure_grafana() {
             log_warn "grafana-cli password reset failed, will retry after start"
         }
     fi
-    
+
     # Fix permissions
     chown -R grafana:grafana /var/lib/grafana
     chmod -R 750 /var/lib/grafana
-    
+
     systemctl daemon-reload
-    systemctl unmask grafana-server 2>/dev/null || true
     systemctl enable grafana-server
     systemctl restart grafana-server
-    
-    # Verify
-    sleep 5
-    if systemctl is-active --quiet grafana-server; then
-        log_success "Grafana running on port 3000 (user: ${GRAFANA_ADMIN_USER})"
-    else
-        log_error "Grafana failed to start"
-        systemctl status grafana-server --no-pager
-        return 1
-    fi
+
+    # Wait for service to be ready
+    local max_wait=30
+    local waited=0
+    while [[ ${waited} -lt ${max_wait} ]]; do
+        if systemctl is-active --quiet grafana-server; then
+            # Also check API
+            if curl -fsS "http://localhost:${GRAFANA_PORT:-3000}/api/version" >/dev/null 2>&1; then
+                log_success "Grafana service is running and API is ready"
+                return 0
+            fi
+        fi
+        sleep 2
+        ((waited += 2))
+    done
+
+    log_error "Grafana service failed to start properly"
+    systemctl status grafana-server --no-pager
+    return 1
 }
 
 configure_grafana_provisioning() {
     log_info "Configuring Grafana provisioning (datasources & dashboards)..."
-    
+
     mkdir -p /etc/grafana/provisioning/datasources
     mkdir -p /etc/grafana/provisioning/dashboards
-    
+
     # Datasource provisioning
     cat > /etc/grafana/provisioning/datasources/prometheus.yaml <<EOF
 apiVersion: 1
@@ -379,7 +387,7 @@ datasources:
     editable: false
     uid: prometheus
 EOF
-    
+
     # Dashboard provisioning
     cat > /etc/grafana/provisioning/dashboards/default.yaml <<EOF
 apiVersion: 1
@@ -395,23 +403,31 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards
 EOF
-    
+
     # Copy Node Exporter dashboard if exists
     if [[ -f "${SCRIPT_DIR}/../config/node_exporter_dashboard.json" ]]; then
         install -m 644 "${SCRIPT_DIR}/../config/node_exporter_dashboard.json" /etc/grafana/provisioning/dashboards/
     elif [[ -f "${SCRIPT_DIR}/../config/node_exporter_dashboard.json" ]]; then
         install -m 644 "${SCRIPT_DIR}/../config/node_exporter_dashboard.json" /etc/grafana/provisioning/dashboards/
     fi
-    
+
+    # Fix permissions
     chown -R root:grafana /etc/grafana/provisioning
     chmod -R 640 /etc/grafana/provisioning/dashboards/* 2>/dev/null || true
     chmod -R 640 /etc/grafana/provisioning/datasources/* 2>/dev/null || true
-    
-    # Restart Grafana to pick up provisioning
-    systemctl restart grafana-server
-    
-    log_success "Grafana provisioning configured"
+
+    # Test and reload nginx
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx 2>/dev/null || true
+        log_success "Nginx config for Ollama applied"
+    else
+        log_warn "Nginx config test failed, skipping reload"
+    fi
 }
+
+# ============================================================================
+# FIREWALL
+# ============================================================================
 
 configure_firewall() {
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
@@ -424,6 +440,9 @@ configure_firewall() {
     fi
 }
 
-# Run main
+# ============================================================================
+# RUN MAIN
+# ============================================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 main "$@"

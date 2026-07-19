@@ -14,6 +14,29 @@ DISTRO=""
 DISTRO_VERSION=""
 DISTRO_CODENAME=""
 
+# State tracking for idempotency (backported from v3)
+STATE_DIR="/var/lib/pi-server-setup/state"
+mkdir -p "${STATE_DIR}"
+
+is_configured() {
+    [[ -f "${STATE_DIR}/network.state" ]] && grep -q "^${1}=true$" "${STATE_DIR}/network.state" 2>/dev/null
+}
+
+mark_configured() {
+    local key="vpn_${1}_configured"
+    sed -i "/^${key}=/d" "${STATE_DIR}/network.state" 2>/dev/null || true
+    echo "${key}=true" >> "${STATE_DIR}/network.state"
+}
+
+is_static_ip_configured() {
+    [[ -f "${STATE_DIR}/network.state" ]] && grep -q "^static_ip_configured=true$" "${STATE_DIR}/network.state" 2>/dev/null
+}
+
+mark_static_ip_configured() {
+    sed -i "/^static_ip_configured=/d" "${STATE_DIR}/network.state" 2>/dev/null || true
+    echo "static_ip_configured=true" >> "${STATE_DIR}/network.state"
+}
+
 # Detect platform and set global variables
 detect_platform() {
     # Architecture
@@ -24,7 +47,7 @@ detect_platform() {
         x86_64|amd64)  ARCH="amd64" ;;
         *)             ARCH="unknown" ;;
     esac
-    
+
     # Distribution
     if [[ -f /etc/os-release ]]; then
         # shellcheck source=/dev/null
@@ -37,324 +60,185 @@ detect_platform() {
         DISTRO_VERSION="unknown"
         DISTRO_CODENAME="unknown"
     fi
-    
+
     # Platform detection
     # Check for Raspberry Pi
     if [[ -f /proc/device-tree/model ]] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
         PLATFORM="raspberry_pi"
         IS_PI=true
-        local model
-        model=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
-        log_debug "Detected Raspberry Pi: ${model}"
-    elif [[ -f /sys/firmware/devicetree/base/model ]] && grep -qi "raspberry pi" /sys/firmware/devicetree/base/model 2>/dev/null; then
-        PLATFORM="raspberry_pi"
-        IS_PI=true
-        local model
-        model=$(cat /sys/firmware/devicetree/base/model 2>/dev/null | tr -d '\0')
-        log_debug "Detected Raspberry Pi: ${model}"
-    # Check for laptop (battery present)
-    elif [[ -d /sys/class/power_supply ]] && find /sys/class/power_supply -name "BAT*" -o -name "battery*" | grep -q . 2>/dev/null; then
+    elif [[ -f /sys/class/dmi/id/chassis_type ]]; then
+        local chassis_type
+        chassis_type=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo "0")
+        case "${chassis_type}" in
+            8|9|10|11|12|14) IS_LAPTOP=true ;;
+        esac
         PLATFORM="laptop"
-        IS_LAPTOP=true
-        log_debug "Detected laptop (battery present)"
-    # Check for VM
-    elif systemd-detect-virt -q 2>/dev/null; then
+    elif [[ -f /proc/cpuinfo ]] && grep -qi "hypervisor\|vmware\|virtualbox\|kvm\|qemu" /proc/cpuinfo 2>/dev/null; then
         PLATFORM="vm"
         IS_VM=true
-        local virt_type
-        virt_type=$(systemd-detect-virt 2>/dev/null)
-        log_debug "Detected VM: ${virt_type}"
-    # Generic desktop/server
     else
         PLATFORM="generic"
-        log_debug "Detected generic desktop/server"
     fi
-    
-    # Export for use in other scripts
+
+    log_info "Platform: ${PLATFORM} (${ARCH}) - ${DISTRO} ${DISTRO_VERSION} (${DISTRO_CODENAME})"
     export PLATFORM IS_PI IS_LAPTOP IS_VM ARCH DISTRO DISTRO_VERSION DISTRO_CODENAME
-    
-    log_info "Platform: ${PLATFORM} (arch: ${ARCH}, distro: ${DISTRO} ${DISTRO_VERSION})"
 }
 
-# Platform-specific package adjustments
+# Get platform-specific package names
 get_packages_for_platform() {
-    local base_packages=("$@")
-    local adjusted_packages=("${base_packages[@]}")
-    
-    if [[ "${IS_PI}" == "true" ]]; then
-        # Pi-specific packages
-        adjusted_packages+=(
-            raspi-config
-            rpi-eeprom
-            linux-firmware-raspi2
-        )
-    fi
-    
-    if [[ "${IS_LAPTOP}" == "true" ]]; then
-        # Laptop-specific packages
-        adjusted_packages+=(
-            tlp
-            thermald
-            powertop
-            acpi
-            acpid
-        )
-    fi
-    
-    if [[ "${IS_VM}" == "true" ]]; then
-        # VM-specific packages
-        adjusted_packages+=(
-            qemu-guest-agent
-            open-vm-tools
-        )
-    fi
-    
-    # Distro-specific adjustments
-    case "${DISTRO}" in
-        debian|ubuntu)
-            # Modern CLI tools available in newer versions
-            if [[ "${DISTRO_VERSION%%.*}" -ge 12 ]] 2>/dev/null || [[ "${DISTRO_CODENAME}" =~ ^(bookworm|trixie|noble|oracular)$ ]]; then
-                adjusted_packages+=(
-                    eza
-                    bat
-                    fd-find
-                    ripgrep
-                )
-            fi
-            ;;
-    esac
-    
+    local -n packages_ref=$1
+    local base_packages=("${!packages_ref}")
+    local adjusted_packages=()
+
+    for pkg in "${base_packages[@]}"; do
+        case "${PLATFORM}" in
+            raspberry_pi)
+                # Pi-specific packages
+                case "${pkg}" in
+                    linux-firmware) adjusted_packages+=("raspberrypi-kernel raspberrypi-firmware") ;;
+                    *) adjusted_packages+=("${pkg}") ;;
+                esac
+                ;;
+            laptop)
+                # Laptop-specific: power management
+                adjusted_packages+=("${pkg}")
+                if [[ "${pkg}" == "tlp" ]]; then
+                    adjusted_packages+=("thermald" "powertop")
+                fi
+                ;;
+            vm)
+                # VM-specific: guest agents
+                adjusted_packages+=("${pkg}")
+                if [[ "${pkg}" == "qemu-guest-agent" ]]; then
+                    adjusted_packages+=("spice-vdagent")
+                fi
+                ;;
+            *)
+                adjusted_packages+=("${pkg}")
+                ;;
+        esac
+    done
+
     echo "${adjusted_packages[@]}"
 }
 
-# Platform-specific service management
+# Services to disable on specific platforms
 get_services_to_disable() {
-    local base_services=("$@")
-    local adjusted_services=("${base_services[@]}")
-    
-    if [[ "${IS_PI}" == "true" ]]; then
-        adjusted_services+=(
-            bluetooth
-            hciuart
-            triggerhappy
-        )
-    fi
-    
-    if [[ "${IS_LAPTOP}" == "true" ]]; then
-        adjusted_services+=(
-            cups
-            avahi-daemon
-            # bluetooth - optional, comment out if you use it
-        )
-    fi
-    
-    if [[ "${IS_VM}" == "true" ]]; then
-        adjusted_services+=(
-            # VM-specific services to disable
-        )
-    fi
-    
-    echo "${adjusted_services[@]}"
-}
+    local -n disabled_ref=$1
+    local base_disabled=("${!disabled_ref}")
+    local adjusted_disabled=()
 
-# Platform-specific optimizations
-apply_platform_optimizations() {
-    log_info "Applying ${PLATFORM}-specific optimizations..."
-    
-    # Common optimizations for all platforms
-    apply_common_optimizations
-    
     case "${PLATFORM}" in
         raspberry_pi)
-            apply_pi_optimizations
+            # Disable desktop services on Pi
+            adjusted_disabled+=("bluetooth" "cups" "avahi-daemon" "ModemManager")
             ;;
         laptop)
-            apply_laptop_optimizations
+            # Keep laptop services
             ;;
         vm)
-            apply_vm_optimizations
+            # Disable hardware services on VM
+            adjusted_disabled+=("bluetooth" "cups" "avahi-daemon" "ModemManager" "thermald")
             ;;
-        generic)
-            apply_generic_optimizations
-            ;;
-    esac
-}
-
-apply_common_optimizations() {
-    # Kernel parameters for performance
-    cat > /etc/sysctl.d/99-pi-server.conf <<'EOF'
-# Network optimizations
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
-net.core.netdev_max_backlog = 5000
-net.ipv4.tcp_congestion_control = bbr
-
-# Filesystem optimizations
-vm.dirty_ratio = 15
-vm.dirty_background_ratio = 5
-vm.vfs_cache_pressure = 50
-
-# Security
-kernel.unprivileged_bpf_disabled = 1
-kernel.kptr_restrict = 2
-vm.unprivileged_userfaultfd = 0
-EOF
-    
-    sysctl --system >/dev/null 2>&1 || true
-}
-
-apply_pi_optimizations() {
-    log_info "Applying Raspberry Pi optimizations..."
-    
-    # Swap optimization for Pi
-    if [[ -f /etc/dphys-swapfile ]]; then
-        local current_swap
-        current_swap=$(grep "^CONF_SWAPSIZE=" /etc/dphys-swapfile | cut -d= -f2)
-        if [[ -z "${current_swap}" ]] || [[ "${current_swap}" -lt 1024 ]]; then
-            log_info "Increasing swap to 1GB..."
-            sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
-            systemctl restart dphys-swapfile
-        fi
-    fi
-    
-    # GPU memory split (headless server)
-    if [[ -f /boot/config.txt ]] && ! grep -q "^gpu_mem=" /boot/config.txt; then
-        echo "gpu_mem=16" >> /boot/config.txt
-        log_info "Set GPU memory to 16MB (headless)"
-    fi
-    
-    # Disable HDMI if headless
-    if [[ -f /boot/config.txt ]] && ! grep -q "^hdmi_blanking=" /boot/config.txt; then
-        echo "hdmi_blanking=1" >> /boot/config.txt
-    fi
-}
-
-apply_laptop_optimizations() {
-    log_info "Applying laptop/desktop optimizations..."
-    
-    # Power management
-    if ! command -v tlp >/dev/null 2>&1; then
-        if apt-get install -y -qq tlp 2>/dev/null; then
-            systemctl enable tlp
-            systemctl start tlp
-            log_success "TLP installed and enabled for power management"
-        fi
-    else
-        systemctl enable tlp
-        systemctl start tlp
-    fi
-    
-    # Thermal management
-    if apt-get install -y -qq thermald 2>/dev/null; then
-        systemctl enable thermald
-        systemctl start thermald
-        log_success "thermald installed and enabled"
-    fi
-    
-    # Configure lid switch behavior (don't sleep on lid close if server)
-    if [[ -f /etc/systemd/logind.conf ]]; then
-        sed -i 's/^#\?HandleLidSwitch=.*/HandleLidSwitch=ignore/' /etc/systemd/logind.conf
-        sed -i 's/^#\?HandleLidSwitchExternalPower=.*/HandleLidSwitchExternalPower=ignore/' /etc/systemd/logind.conf
-        sed -i 's/^#\?HandleLidSwitchDocked=.*/HandleLidSwitchDocked=ignore/' /etc/systemd/logind.conf
-        systemctl restart systemd-logind
-    fi
-    
-    # Battery charge threshold (if supported)
-    if [[ -f /sys/class/power_supply/BAT0/charge_control_end_threshold ]]; then
-        echo 80 > /sys/class/power_supply/BAT0/charge_control_end_threshold 2>/dev/null || true
-        log_info "Set battery charge threshold to 80%"
-    fi
-}
-
-apply_vm_optimizations() {
-    log_info "Applying VM optimizations..."
-    
-    # Install guest agent
-    case "${DISTRO}" in
-        debian|ubuntu)
-            apt-get install -y -qq qemu-guest-agent 2>/dev/null && systemctl enable --now qemu-guest-agent
+        *)
+            adjusted_disabled+=("bluetooth" "cups" "avahi-daemon" "ModemManager")
             ;;
     esac
-    
-    # Disable unnecessary services in VM
-    local vm_disable=(
-        bluetooth
-        cups
-        avahi-daemon
-    )
-    for svc in "${vm_disable[@]}"; do
-        systemctl disable "${svc}" 2>/dev/null || true
-        systemctl stop "${svc}" 2>/dev/null || true
-    done
+
+    echo "${adjusted_disabled[@]}"
 }
 
-apply_generic_optimizations() {
-    log_info "Applying generic server optimizations..."
-    
-    # Create swap file if not present and not using dphys-swapfile
-    if [[ ! -f /etc/dphys-swapfile ]] && [[ ! -f /swapfile ]] && ! swapon --show | grep -q "^/swapfile"; then
-        local swap_size_gb=2
-        log_info "Creating ${swap_size_gb}GB swap file..."
-        fallocate -l "${swap_size_gb}G" /swapfile
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo "/swapfile none swap sw 0 0" >> /etc/fstab
-        log_success "Swap file created"
-    fi
-}
-
-# Platform-specific user groups
+# Get platform-specific user groups
 get_extra_user_groups() {
     local base_groups=("$@")
     local adjusted_groups=("${base_groups[@]}")
-    
+
+    case "${PLATFORM}" in
+        raspberry_pi)
+            adjusted_groups+=("gpio" "i2c" "spi" "video" "render" "docker")
+            ;;
+        laptop)
+            adjusted_groups+=("docker" "wireshark" "kvm" "libvirt")
+            ;;
+        vm)
+            adjusted_groups+=("docker" "kvm" "libvirt")
+            ;;
+    esac
+
+    # Return comma-separated for useradd -G
+    local IFS=","
+    echo "${adjusted_groups[*]}"
+}
+
+# Apply platform-specific optimizations
+apply_platform_optimizations() {
+    log_info "Applying ${PLATFORM} optimizations..."
+
+    # Swap optimization for Pi
     if [[ "${IS_PI}" == "true" ]]; then
-        adjusted_groups+=(
-            gpio
-            i2c
-            spi
-            video
-            render
-        )
+        # Swap optimization for Pi - only if dphys-swapfile exists
+        if [[ -f /etc/dphys-swapfile ]]; then
+            local current_swap
+            current_swap=$(grep "^CONF_SWAPSIZE=" /etc/dphys-swapfile | cut -d= -f2)
+            if [[ -z "${current_swap}" ]] || [[ "${current_swap}" -lt 2048 ]]; then
+                log_info "Increasing swap to 2GB..."
+                sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
+                systemctl restart dphys-swapfile
+            fi
+        fi
+
+        # GPU memory split (headless server) - only if /boot/config.txt exists
+        if [[ -f /boot/config.txt ]] && ! grep -q "^gpu_mem=" /boot/config.txt; then
+            echo "gpu_mem=16" >> /boot/config.txt
+            log_info "Set GPU memory to 16MB (headless)"
+        fi
+
+        # Disable HDMI if headless - only if /boot/config.txt exists
+        if [[ -f /boot/config.txt ]] && ! grep -q "^hdmi_blanking=" /boot/config.txt; then
+            echo "hdmi_blanking=1" >> /boot/config.txt
+        fi
     fi
-    
+
+    # Laptop optimizations
     if [[ "${IS_LAPTOP}" == "true" ]]; then
-        adjusted_groups+=(
-            video
-            render
-            audio
-        )
+        # TLP already installed via get_packages_for_platform
+        # Configure lid switch
+        local logind_conf="/etc/systemd/logind.conf"
+        if [[ -f "${logind_conf}" ]] && ! grep -q "^HandleLidSwitch=" "${logind_conf}"; then
+            echo "HandleLidSwitch=ignore" >> "${logind_conf}"
+            log_info "Configured lid switch to ignore"
+        fi
+
+        # Battery charge threshold (if supported)
+        if [[ -f /sys/class/power_supply/BAT0/charge_control_end_threshold ]]; then
+            echo 80 > /sys/class/power_supply/BAT0/charge_control_end_threshold 2>/dev/null || true
+        fi
     fi
-    
-    echo "${adjusted_groups[@]}"
+
+    # VM optimizations
+    if [[ "${IS_VM}" == "true" ]]; then
+        # Disable hardware-specific services
+        systemctl disable bluetooth cups avahi-daemon ModemManager 2>/dev/null || true
+    fi
 }
 
 # Platform-specific VNC setup
 configure_vnc() {
     case "${PLATFORM}" in
         raspberry_pi)
-            if command -v raspi-config >/dev/null; then
+            if command -v vncserver >/dev/null 2>&1; then
                 log_info "Configuring RealVNC..."
-                local vnc_state
-                vnc_state=$(raspi-config nonint get_vnc 2>/dev/null || echo "1")
-                if [[ "${vnc_state}" -eq 0 ]]; then
-                    log_info "RealVNC is already enabled"
-                else
-                    raspi-config nonint do_vnc 0
-                    log_success "RealVNC enabled"
-                fi
+                # RealVNC is pre-installed on Raspberry Pi OS
+                systemctl enable vncserver-x11-serviced 2>/dev/null || true
+                systemctl start vncserver-x11-serviced 2>/dev/null || true
+                log_info "RealVNC configured (port 5900)"
             fi
             ;;
-        laptop|generic)
-            # Install and configure TigerVNC or similar for non-Pi
-            log_info "VNC: Consider installing TigerVNC for remote desktop"
-            log_info "  apt-get install tigervnc-standalone-server"
+        laptop)
+            log_info "VNC not configured on laptop (use system settings)"
             ;;
-        vm)
-            log_info "VNC: VMs typically use console/spice/qxl instead"
+        *)
+            log_info "VNC not configured for ${PLATFORM}"
             ;;
     esac
 }
@@ -363,32 +247,28 @@ configure_vnc() {
 get_temperature() {
     case "${PLATFORM}" in
         raspberry_pi)
-            if command -v vcgencmd >/dev/null; then
-                vcgencmd measure_temp 2>/dev/null | sed 's/temp=//' || echo "N/A"
+            if command -v vcgencmd >/dev/null 2>&1; then
+                vcgencmd measure_temp | sed 's/temp=//'
             else
                 echo "N/A"
             fi
             ;;
         laptop|generic|vm)
-            # Try thermal zones
-            if [[ -d /sys/class/thermal ]]; then
-                local max_temp=0
-                for zone in /sys/class/thermal/thermal_zone*; do
-                    if [[ -f "${zone}/temp" ]]; then
-                        local temp
-                        temp=$(cat "${zone}/temp" 2>/dev/null || echo 0)
-                        # Convert millidegrees to degrees
-                        temp=$((temp / 1000))
-                        if [[ ${temp} -gt ${max_temp} ]]; then
-                            max_temp=${temp}
-                        fi
+            # Try to read from thermal zones
+            local max_temp=0
+            for zone in /sys/class/thermal/thermal_zone*/temp 2>/dev/null; do
+                if [[ -f "${zone}" ]]; then
+                    local temp
+                    temp=$(cat "${zone}" 2>/dev/null || echo 0)
+                    # Convert millidegrees to degrees
+                    temp=$((temp / 1000))
+                    if [[ ${temp} -gt ${max_temp} ]]; then
+                        max_temp=${temp}
                     fi
-                done
-                if [[ ${max_temp} -gt 0 ]]; then
-                    echo "${max_temp}°C"
-                else
-                    echo "N/A"
                 fi
+            done
+            if [[ ${max_temp} -gt 0 ]]; then
+                echo "${max_temp}°C"
             else
                 echo "N/A"
             fi
@@ -423,9 +303,12 @@ configure_swap() {
                 elif [[ ${total_mem_gb} -ge 8 ]]; then
                     swap_size_gb=2
                 fi
-                
+
                 log_info "Creating ${swap_size_gb}GB swap file..."
-                fallocate -l "${swap_size_gb}G" /swapfile
+                fallocate -l "${swap_size_gb}G" /swapfile 2>/dev/null || {
+                    # fallocate might fail on some filesystems, use dd as fallback
+                    dd if=/dev/zero of=/swapfile bs=1G count="${swap_size_gb}" 2>/dev/null
+                }
                 chmod 600 /swapfile
                 mkswap /swapfile
                 swapon /swapfile
@@ -447,4 +330,7 @@ export -f apply_platform_optimizations
 export -f configure_vnc
 export -f get_temperature
 export -f configure_swap
-export -f get_extra_user_groups
+export -f is_configured
+export -f mark_configured
+export -f is_static_ip_configured
+export -f mark_static_ip_configured

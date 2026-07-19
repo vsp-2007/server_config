@@ -1,14 +1,14 @@
 #!/bin/bash
 # Pi Server Setup v2 - Master Installation Script
-# Modern, secure, and modular server automation for any Debian 13+/Ubuntu 24.04+ system
-# EXPERIMENTAL - Use CLI for stability
+# Modern, secure, and modular server automation for Debian 13+/Ubuntu 24.04+ systems
+# Stable successor to main branch with state tracking for idempotency
 
 set -euo pipefail
 
 # ============================================================================
 # CONSTANTS & GLOBALS
 # ============================================================================
-readonly SCRIPT_VERSION="2.0.0-experimental"
+readonly SCRIPT_VERSION="2.0.0"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_NAME="pi-server-setup"
 readonly CONFIG_FILE_DEFAULT="${SCRIPT_DIR}/settings.conf"
@@ -17,21 +17,18 @@ readonly LOG_DIR="/var/log/${PROJECT_NAME}"
 readonly LOG_FILE="${LOG_DIR}/install_$(date +%Y%m%d_%H%M%S).log"
 readonly STATE_DIR="/var/lib/${PROJECT_NAME}"
 readonly BACKUP_DIR="${STATE_DIR}/backups"
+readonly INSTALL_STATE_FILE="${STATE_DIR}/install.state"
 
-# Color detection - works with sudo and various terminals
-if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && command -v tput >/dev/null 2>&1 && tput colors >/dev/null 2>&1; then
-    readonly RED="$(tput setaf 1)"
-    readonly GREEN="$(tput setaf 2)"
-    readonly YELLOW="$(tput setaf 3)"
-    readonly BLUE="$(tput setaf 4)"
-    readonly MAGENTA="$(tput setaf 5)"
-    readonly CYAN="$(tput setaf 6)"
-    readonly BOLD="$(tput bold)"
-    readonly DIM="$(tput dim)"
-    readonly NC="$(tput sgr0)"
-else
-    readonly RED='' GREEN='' YELLOW='' BLUE='' MAGENTA='' CYAN='' BOLD='' DIM='' NC=''
-fi
+# Raw ANSI colors (reliable under sudo, no tput dependency)
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly MAGENTA='\033[0;35m'
+readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
+readonly DIM='\033[2m'
+readonly NC='\033[0m'
 
 # Module definitions (order matters for dependencies)
 readonly MODULES=(
@@ -90,7 +87,7 @@ _log() {
     local output="${timestamp} [${level}] ${msg}"
     
     printf '%s\n' "${output}"
-    
+    # Try to log to file if directory exists
     [[ -d "${LOG_DIR}" ]] && printf '%s\n' "${output}" >> "${LOG_FILE}" 2>/dev/null || true
 }
 
@@ -108,6 +105,25 @@ show_progress() {
 }
 
 # ============================================================================
+# STATE TRACKING (Idempotency)
+# ============================================================================
+mark_module_installed() {
+    echo "${1}=installed" >> "${INSTALL_STATE_FILE}"
+}
+
+is_module_installed() {
+    [[ -f "${INSTALL_STATE_FILE}" ]] && grep -q "^${1}=installed$" "${INSTALL_STATE_FILE}" 2>/dev/null
+}
+
+mark_module_failed() {
+    echo "${1}=failed" >> "${INSTALL_STATE_FILE}"
+}
+
+get_module_state() {
+    [[ -f "${INSTALL_STATE_FILE}" ]] && grep "^${1}=" "${INSTALL_STATE_FILE}" 2>/dev/null | cut -d= -f2
+}
+
+# ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
 die() { log_error "$*"; exit 1; }
@@ -119,8 +135,10 @@ check_os() {
     source /etc/os-release
     if [[ "${ID}" != "raspbian" && "${ID}" != "debian" && "${ID_LIKE:-}" != *"debian"* ]]; then
         log_warn "Designed for Debian-based OS. Current: ${PRETTY_NAME}"
-        read -p "Continue anyway? [y/N] " -n 1 -r; echo
-        [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+        if [[ "${SKIP_OS_CHECK:-false}" != "true" ]]; then
+            read -p "Continue anyway? [y/N] " -n 1 -r; echo
+            [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+        fi
     fi
     log_info "OS: ${PRETTY_NAME}"
 }
@@ -134,14 +152,6 @@ check_arch() {
         *) die "Unsupported architecture: ${arch}" ;;
     esac
     log_info "Architecture: ${ARCH}"; export ARCH
-}
-
-# ============================================================================
-# CRITICAL: Run this FIRST to ensure log directory exists before any logging
-# ============================================================================
-setup_directories() {
-    mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
-    chmod 750 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" 2>/dev/null || true
 }
 
 sanitize_config() {
@@ -202,7 +212,6 @@ prompt_missing_config() {
     echo "Missing required values will be prompted. Press Enter to use defaults or generate random values."
     echo
     
-    # Helper: prompt with validation
     prompt_with_validation() {
         local var_name="$1" prompt_text="$2" validator="$3" default="$4" is_secret="$5"
         local value
@@ -221,26 +230,20 @@ prompt_missing_config() {
         save_config_var "${var_name}" "${value}" "${config_file}"
     }
     
-    # PI_USER
     [[ -z "${PI_USER:-}" ]] && prompt_with_validation PI_USER "Enter system username" validate_username "piadmin" false
     
-    # PI_PASSWORD
     [[ -z "${PI_PASSWORD:-}" ]] && prompt_with_validation PI_PASSWORD "Enter password for ${PI_USER} (min 8 chars, empty for random)" validate_password "" true
     [[ -z "${PI_PASSWORD}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random password for ${PI_USER}"; save_config_var "PI_PASSWORD" "${PI_PASSWORD}" "${config_file}"; }
     
-    # GRAFANA_ADMIN_PASSWORD
     [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && prompt_with_validation GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password (min 8 chars, empty for random)" validate_password "" true
     [[ -z "${GRAFANA_ADMIN_PASSWORD}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Grafana password"; save_config_var "GRAFANA_ADMIN_PASSWORD" "${GRAFANA_ADMIN_PASSWORD}" "${config_file}"; }
     
-    # PIHOLE_PASSWORD
     [[ -z "${PIHOLE_PASSWORD:-}" ]] && prompt_with_validation PIHOLE_PASSWORD "Enter Pi-hole admin password (min 8 chars, empty for random)" validate_password "" true
     [[ -z "${PIHOLE_PASSWORD}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Pi-hole password"; save_config_var "PIHOLE_PASSWORD" "${PIHOLE_PASSWORD}" "${config_file}"; }
     
-    # SMB_PASSWORD
     [[ -z "${SMB_PASSWORD:-}" ]] && prompt_with_validation SMB_PASSWORD "Enter Samba password for ${SMB_USER:-smbuser} (min 8 chars, empty for random)" validate_password "" true
     [[ -z "${SMB_PASSWORD}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Samba password"; save_config_var "SMB_PASSWORD" "${SMB_PASSWORD}" "${config_file}"; }
     
-    # Optional: Telegram Admin Bot
     echo -e "\n${CYAN}--- Telegram Bot Configuration (Optional) ---${NC}"
     if [[ -z "${TELEGRAM_ADMIN_TOKEN:-}" ]]; then
         read -rp "Enter Telegram Admin Bot Token (from @BotFather, or press Enter to skip): " TELEGRAM_ADMIN_TOKEN
@@ -251,7 +254,6 @@ prompt_missing_config() {
         [[ -n "${TELEGRAM_ADMIN_CHAT_ID}" ]] && save_config_var "TELEGRAM_ADMIN_CHAT_ID" "${TELEGRAM_ADMIN_CHAT_ID}" "${config_file}"
     fi
     
-    # Optional: Telegram User Bot
     if [[ -z "${TELEGRAM_USER_TOKEN:-}" ]]; then
         read -rp "Enter Telegram User Bot Token (for group status, or press Enter to skip): " TELEGRAM_USER_TOKEN
         [[ -n "${TELEGRAM_USER_TOKEN}" ]] && save_config_var "TELEGRAM_USER_TOKEN" "${TELEGRAM_USER_TOKEN}" "${config_file}"
@@ -261,13 +263,11 @@ prompt_missing_config() {
         [[ -n "${TELEGRAM_USER_CHAT_ID}" ]] && save_config_var "TELEGRAM_USER_CHAT_ID" "${TELEGRAM_USER_CHAT_ID}" "${config_file}"
     fi
     
-    # Optional: Tailscale
     if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
         read -rp "Enter Tailscale Auth Key (or press Enter for interactive login): " TAILSCALE_AUTH_KEY
         [[ -n "${TAILSCALE_AUTH_KEY}" ]] && save_config_var "TAILSCALE_AUTH_KEY" "${TAILSCALE_AUTH_KEY}" "${config_file}"
     fi
     
-    # Optional: Static IP
     if [[ -z "${STATIC_IP:-}" ]]; then
         read -rp "Enter Static IP with CIDR (e.g., 192.168.1.100/24, or press Enter for DHCP): " STATIC_IP
         [[ -n "${STATIC_IP}" ]] && save_config_var "STATIC_IP" "${STATIC_IP}" "${config_file}"
@@ -373,189 +373,68 @@ execute_module() {
     log_info "Executing module: ${module} (${script_name})"
     chmod +x "${script_path}"
     set -a; source "${CONFIG_FILE}"; set +a
-    if "${script_path}"; then log_success "Module ${module} completed"; touch "${STATE_DIR}/${module}.installed"; return 0; else log_error "Module ${module} failed"; return $?; fi
-}
-
-generate_summary() {
-    local ip; ip=$(hostname -I | awk '{print $1}')
-    local summary="Installation Complete!\n\nDevice IP: ${ip}\n\n"
-    for module in "${MODULES_TO_INSTALL[@]}"; do
-        if [[ -f "${STATE_DIR}/${module}.installed" ]]; then
-            summary+="✓ ${module}\n"
-            case "${module}" in
-                system) summary+="    SSH: ssh ${PI_USER}@${ip}\n    VNC: ${ip}:5900\n" ;;
-                network) summary+="    Tailscale: Connected\n" ;;
-                pihole) summary+="    Web UI: http://${ip}/admin\n    Password: ${PIHOLE_PASSWORD}\n" ;;
-                monitoring) summary+="    Prometheus: http://${ip}:9090\n    Grafana: http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})\n    Alertmanager: http://${ip}:9093\n" ;;
-                samba) summary+="    Webmin: https://${ip}:10000\n    Samba: \\\\${ip}\\${SMB_SHARE_NAME:-pishare}\n" ;;
-                telegram) summary+="    Service: telegram-bot.service\n" ;;
-                localsend) summary+="    Port: 53317\n" ;;
-                stirling) summary+="    URL: http://${ip}:8080\n" ;;
-                nginx) summary+="    Domains: dashboard.home, pi.home, n8n.home, etc.\n    Configure DNS in Pi-hole: http://${ip}:8081/admin/dns_records.php\n" ;;
-                cockpit) summary+="    URL: https://${ip}:9091\n" ;;
-                n8n) summary+="    URL: http://${ip}:5678 (or http://n8n.home)\n" ;;
-            esac
-            summary+="\n"
-        else
-            summary+="✗ ${module} (failed or skipped)\n\n"
-        fi
-    done
-    summary+="\nLog file: ${LOG_FILE}\n"
-    echo -e "$summary"
-}
-
-show_summary() { generate_summary; }
-
-# ============================================================================
-# TUI FUNCTIONS (whiptail/dialog) - only loaded if --tui flag used
-# ============================================================================
-check_tui_tool() {
-    if command -v dialog >/dev/null 2>&1; then TUI_TOOL="dialog"; return 0
-    elif command -v whiptail >/dev/null 2>&1; then TUI_TOOL="whiptail"; return 0
-    fi; return 1
-}
-
-install_tui_tool() {
-    log_info "Installing TUI tool (dialog)..."
-    apt-get update -qq && apt-get install -y -qq dialog
-}
-
-run_tui_mode() {
-    # CRITICAL: Setup directories FIRST for logging
-    setup_directories
-    
-    log_info "Starting TUI mode..."
-    
-    if ! check_tui_tool; then
-        log_info "TUI tool not found, installing dialog..."
-        install_tui_tool
-        check_tui_tool || die "Failed to install dialog/whiptail"
+    if "${script_path}"; then 
+        log_success "Module ${module} completed"
+        mark_module_installed "${module}"
+        return 0
+    else 
+        log_error "Module ${module} failed"
+        return $?
     fi
+}
+
+show_summary() {
+    local ip; ip=$(hostname -I | awk '{print $1}')
+    echo
+    echo -e "${BOLD}${CYAN}=========================================${NC}"
+    echo -e "${BOLD}${CYAN}   INSTALLATION SUMMARY${NC}"
+    echo -e "${BOLD}${CYAN}=========================================${NC}"
+    echo -e "Device IP: ${GREEN}${ip}${NC}"
+    echo
     
-    local tool="$TUI_TOOL"
-    
-    # Welcome
-    $tool --title "Pi Server Setup v2 - EXPERIMENTAL" --msgbox \
-        "⚠️  WARNING: This is EXPERIMENTAL software.\n\nUse CLI mode for stability and production use.\nTUI mode may have issues and is for testing only.\n\nContinue at your own risk." 12 70
-    
-    # Module selection
-    local selected_modules
-    log_info "Opening module selection dialog..."
-    selected_modules=$($tool --title "Module Selection" --checklist \
-        "Select modules to install (Space to toggle, Enter to confirm):\n\nRequired modules are pre-selected and cannot be deselected." \
-        20 78 12 \
-        "system" "System Basics (Required)" ON \
-        "network" "Tailscale + Firewall + Fail2Ban" OFF \
-        "pihole" "Pi-hole DNS Ad-blocking" OFF \
-        "monitoring" "Prometheus + Grafana + Alertmanager" OFF \
-        "samba" "Samba + Webmin" OFF \
-        "utils" "Reports + Cron + Maintenance" OFF \
-        "telegram" "Dual Telegram Bot (Admin + User)" OFF \
-        "localsend" "LocalSend File Sharing" OFF \
-        "stirling" "Stirling-PDF" OFF \
-        "nginx" "Nginx Reverse Proxy (.home domains)" OFF \
-        "cockpit" "Cockpit Web Admin" OFF \
-        "n8n" "n8n Automation Engine" OFF \
-        3>&1 1>&2 2>&3)
-    local ret=$?
-    log_info "Module selection dialog returned: ${ret}"
-    [[ $ret -ne 0 ]] && die "Module selection cancelled"
-    [[ -z "$selected_modules" ]] && die "No modules selected"
-    IFS=' ' read -ra MODULES_TO_INSTALL <<< "$selected_modules"
-    log_info "Selected modules: ${MODULES_TO_INSTALL[*]}"
-    
-    # Config form
-    log_info "Opening configuration form..."
-    local config_output
-    config_output=$($tool --title "Configuration" --form \
-        "Enter required configuration (Tab to navigate, Enter to confirm):\n\nRequired fields marked with *." \
-        20 78 10 \
-        "PI_USER*"      1 1 "piadmin"     1 20 20 0 \
-        "SSH_PORT*"     2 1 "2222"        2 20 10 0 \
-        "PI_PASSWORD"   3 1 ""            3 20 30 0 \
-        "TELEGRAM_TOKEN" 4 1 ""          4 20 50 0 \
-        "TAILSCALE_KEY" 5 1 ""           5 20 50 0 \
-        "STATIC_IP"     6 1 ""            6 20 20 0 \
-        3>&1 1>&2 2>&3)
-    local ret=$?
-    log_info "Config form returned: ${ret}"
-    [[ $ret -ne 0 ]] && die "Configuration cancelled"
-    IFS=$'\n' read -r PI_USER SSH_PORT PI_PASSWORD TELEGRAM_TOKEN TAILSCALE_KEY STATIC_IP <<< "$config_output"
-    log_info "Config values: PI_USER=${PI_USER}, SSH_PORT=${SSH_PORT}, STATIC_IP=${STATIC_IP}"
-    
-    save_config_var "PI_USER" "$PI_USER" "$CONFIG_FILE"
-    save_config_var "SSH_PORT" "$SSH_PORT" "$CONFIG_FILE"
-    [[ -n "$PI_PASSWORD" ]] && save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"
-    [[ -n "$TELEGRAM_TOKEN" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "$TELEGRAM_TOKEN" "$CONFIG_FILE"
-    [[ -n "$TAILSCALE_KEY" ]] && save_config_var "TAILSCALE_AUTH_KEY" "$TAILSCALE_KEY" "$CONFIG_FILE"
-    [[ -n "$STATIC_IP" ]] && save_config_var "STATIC_IP" "$STATIC_IP" "$CONFIG_FILE"
-    
-    # Reload config
-    # shellcheck source=/dev/null
-    source "$CONFIG_FILE"
-    
-    # Generate passwords for empty fields
-    [[ -z "${PI_PASSWORD:-}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random password for ${PI_USER}"; save_config_var "PI_PASSWORD" "$PI_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Grafana password"; save_config_var "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${PIHOLE_PASSWORD:-}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Pi-hole password"; save_config_var "PIHOLE_PASSWORD" "$PIHOLE_PASSWORD" "$CONFIG_FILE"; }
-    [[ -z "${SMB_PASSWORD:-}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Samba password"; save_config_var "SMB_PASSWORD" "$SMB_PASSWORD" "$CONFIG_FILE"; }
-    
-    # Confirm
-    local module_list=$(printf '%s\n' "${MODULES_TO_INSTALL[@]}")
-    log_info "Showing confirmation dialog..."
-    $tool --title "Confirm Installation" --yesno "Ready to install the following modules:\n\n$module_list\n\nProceed with installation?" 15 70 || die "Installation cancelled"
-    
-    # Resolve dependencies
-    log_info "Resolving dependencies..."
-    resolve_dependencies MODULES_TO_INSTALL
-    
-    # Check already installed
-    local to_install=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
-        if check_module_installed "$module"; then
-            log_warn "Module $module appears already installed"
-            $tool --yesno "Module $module appears already installed. Reinstall?" 8 60 && to_install+=("$module")
+        local state=$(get_module_state "${module}")
+        if [[ "${state}" == "installed" ]]; then
+            echo -e "${GREEN}✓${NC} ${module}"
+            case "${module}" in
+                system) echo "    SSH: ssh ${PI_USER}@${ip}"; echo "    VNC: ${ip}:5900" ;;
+                network) echo "    Tailscale: Connected" ;;
+                pihole) echo "    Web UI: http://${ip}/admin"; echo "    Password: ${PIHOLE_PASSWORD}" ;;
+                monitoring) echo "    Prometheus: http://${ip}:9090"; echo "    Grafana: http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})"; echo "    Alertmanager: http://${ip}:9093" ;;
+                samba) echo "    Webmin: https://${ip}:10000"; echo "    Samba: \\\\${ip}\\${SMB_SHARE_NAME:-pishare}" ;;
+                telegram) echo "    Service: telegram-bot.service" ;;
+                localsend) echo "    Port: 53317" ;;
+                stirling) echo "    URL: http://${ip}:8080" ;;
+                nginx) echo "    Domains: dashboard.home, pi.home, n8n.home, etc."; echo "    Configure DNS in Pi-hole: http://${ip}:8081/admin/dns_records.php" ;;
+                cockpit) echo "    URL: https://${ip}:9091" ;;
+                n8n) echo "    URL: http://${ip}:5678 (or http://n8n.home)" ;;
+            esac
+            echo
         else
-            to_install+=("$module")
+            echo -e "${RED}✗${NC} ${module} (failed or skipped)"
+            echo
         fi
     done
-    MODULES_TO_INSTALL=("${to_install[@]}")
-    [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
-    
-    # Execute with progress gauge
-    local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
-    for module in "${MODULES_TO_INSTALL[@]}"; do
-        ((current++))
-        log_info "Installing module: ${module} (${current}/${#MODULES_TO_INSTALL[@]})"
-        $tool --title "Installing $module" --gauge "Installing $module ($current of $total)..." 8 70 $((current * 100 / total)) &
-        local gauge_pid=$!
-        
-        if execute_module "$module"; then
-            log_success "Module $module completed"
-        else
-            log_error "Module $module failed"
-            failed+=("$module")
-        fi
-        kill $gauge_pid 2>/dev/null || true
-    done
-    
-    # Summary
-    local summary
-    summary=$(generate_summary)
-    $tool --title "Installation Complete" --msgbox "$summary" 20 70
-    
-    [[ ${#failed[@]} -gt 0 ]] && exit 1 || exit 0
+    echo -e "${BOLD}${CYAN}=========================================${NC}"
+    echo -e "${BOLD}${GREEN}Installation Complete!${NC}"
+    echo -e "Log file: ${LOG_FILE}"
+    echo -e "${BOLD}${CYAN}=========================================${NC}"
 }
 
 # ============================================================================
-# MAIN - setup_directories() called IMMEDIATELY at start
+# SETUP DIRECTORIES (must be called after check_root)
+# ============================================================================
+setup_directories() {
+    mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
+    chmod 750 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" 2>/dev/null || true
+}
+
+# ============================================================================
+# MAIN
 # ============================================================================
 main() {
-    # CRITICAL: Setup directories BEFORE ANYTHING ELSE
-    setup_directories
-    
     local config_file="${CONFIG_FILE_DEFAULT}" modules_arg="" non_interactive=false dry_run=false repair_mode=false uninstall_mode=false
-    TUI_MODE=false
+    SKIP_OS_CHECK=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -563,93 +442,85 @@ main() {
             -y|--yes) non_interactive=true ;;
             -m|--modules) modules_arg="$2"; shift ;;
             -c|--config) config_file="$2"; shift ;;
-            -h|--help) cat <<EOF
+            -h|--help) 
+                cat <<EOF
 Usage: sudo ./install.sh [OPTIONS]
 
 Options:
-  -y, --yes          Non-interactive mode (requires pre-configured settings.conf)
-  -m, --modules      Comma-separated modules (e.g., "system,network,pihole")
-  -c, --config       Config file path (default: ./settings.conf)
-  -h, --help         Show this help
-  -v, --version      Show version
-  --dry-run          Validate config without making changes
-  --repair           Attempt to repair broken installations
-  --uninstall        Uninstall modules
-  --tui              Terminal UI mode (Experimental)
-  --gui              Web GUI mode (Experimental)
+  -y, --yes              Non-interactive mode (requires pre-configured settings.conf)
+  -m, --modules          Comma-separated modules to install (e.g., "system,network,pihole")
+  -c, --config           Config file path (default: ./settings.conf)
+  -h, --help             Show this help
+  -v, --version          Show version
+  --dry-run              Validate config without making changes
+  --repair               Attempt to repair broken installations
+  --uninstall            Uninstall modules
+  --skip-os-check        Skip OS/distribution check (for testing/dry-run on non-Debian)
 
-Available modules: $(printf '%s, ' "${MODULES[@]}" | sed 's/:.*//g' | sed 's/, $//')
+Available modules: system, network, pihole, monitoring, samba, utils, telegram, localsend, stirling, nginx, cockpit, n8n
 
 Examples:
-  sudo ./install.sh                          # Interactive CLI (default)
-  sudo ./install.sh --tui                    # Terminal UI (Experimental)
-  sudo ./install.sh -y                       # Non-interactive CLI
-  sudo ./install.sh -m "system,network,pihole"
+  sudo ./install.sh                          # Interactive full install
+  sudo ./install.sh -y                       # Non-interactive full install
+  sudo ./install.sh -m "system,network,pihole"  # Install specific modules
   sudo ./install.sh --dry-run                # Validate config only
+  sudo ./install.sh --skip-os-check --dry-run # Test on non-Debian
 EOF
                 exit 0 ;;
             -v|--version) echo "${SCRIPT_VERSION}"; exit 0 ;;
             --dry-run) dry_run=true ;;
             --repair) repair_mode=true ;;
             --uninstall) uninstall_mode=true ;;
-            --tui) TUI_MODE=true ;;
-            --gui) log_warn "Web GUI not yet implemented. Use --tui for TUI."; exit 1 ;;
+            --skip-os-check) SKIP_OS_CHECK=true ;;
             *) die "Unknown option: $1" ;;
         esac; shift
     done
     
-    # Experimental warning (now logs to file since dirs exist)
-    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
-    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.          ║${NC}"
-    echo -e "${BOLD}${YELLOW}╚════════════════════════════════════════════════════════════════════════╝${NC}"
-    echo
-    
-    # Check for TUI mode
-    if [[ "${TUI_MODE:-false}" == "true" ]]; then
-        log_info "Starting in TUI mode (Experimental)"
-        run_tui_mode
-        exit $?
+    # Allow dry-run without root
+    if [[ "${dry_run}" == "true" ]]; then
+        log_info "Running in dry-run mode (no root required)"
+    else
+        # Check root FIRST - before any directory creation
+        check_root
     fi
     
-    # CLI Mode Selection - fixed loop
-    if [[ "${non_interactive}" != "true" ]]; then
-        echo -e "${BOLD}Select installation mode:${NC}"
-        echo "  ${GREEN}1)${NC} CLI - Stable, production-ready (DEFAULT)"
-        echo "  ${YELLOW}2)${NC} TUI - Terminal UI (Experimental, may have issues)"
-        echo
-        
-        while true; do
-            echo -n "Select mode [1]: "
-            read -r mode_choice
-            mode_choice="${mode_choice:-1}"
-            case "${mode_choice}" in
-                1|"")
-                    log_info "Starting CLI mode (Stable, production-ready)"
-                    break
-                    ;;
-                2)
-                    log_warn "Starting TUI mode (Experimental)..."
-                    run_tui_mode
-                    exit $?
-                    ;;
-                *)
-                    log_warn "Invalid choice. Please enter 1 or 2."
-                    ;;
-            esac
+    # NOW create directories (after root check, or skipped for dry-run)
+    if [[ "${dry_run}" != "true" ]]; then
+        setup_directories
+    fi
+    
+    # Skip all system checks in dry-run mode
+    if [[ "${dry_run}" != "true" ]]; then
+        # Ensure basic tools are available
+        local required_base_tools=(curl wget gpg systemctl)
+        for tool in "${required_base_tools[@]}"; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                log_warn "Required tool '$tool' not found, attempting to install..."
+                if command -v apt-get >/dev/null 2>&1; then
+                    apt-get update -qq && apt-get install -y -qq "$tool" 2>/dev/null || true
+                elif command -v pacman >/dev/null 2>&1; then
+                    pacman -Sy --noconfirm "$tool" 2>/dev/null || true
+                elif command -v dnf >/dev/null 2>&1; then
+                    dnf install -y "$tool" 2>/dev/null || true
+                fi
+            fi
         done
+        
+        check_os
+        check_arch
+    else
+        # In dry-run, skip all system checks
+        log_info "Dry-run: skipping OS/arch/tool checks"
     fi
     
-    # CLI Mode (default)
-    log_info "Starting ${PROJECT_NAME} v${SCRIPT_VERSION} (CLI Mode)"
-    log_info "Log file: ${LOG_FILE}"
-    
-    check_root; check_os; check_arch
-    
+    # Load configuration
     [[ ! -f "${config_file}" ]] && [[ -f "${CONFIG_FILE_DEFAULT}" ]] && config_file="${CONFIG_FILE_DEFAULT}"
     [[ ! -f "${config_file}" ]] && die "Config file not found. Copy config/settings.conf.example to settings.conf"
     
-    sanitize_config "${config_file}"; load_config "${config_file}"; validate_config
+    sanitize_config "${config_file}"
+    load_config "${config_file}"
+    validate_config
+    
     [[ "${dry_run}" == "true" ]] && { log_success "Dry run successful - configuration valid"; exit 0; }
     
     prompt_missing_config "${config_file}" "${non_interactive}"
@@ -658,10 +529,12 @@ EOF
     
     local to_install=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
-        if check_module_installed "${module}"; then
-            log_warn "Module ${module} appears already installed"
+        if is_module_installed "${module}"; then
+            log_warn "Module ${module} already installed (state: $(get_module_state ${module}))"
             [[ "${non_interactive}" != "true" ]] && { read -rp "Reinstall ${module}? [y/N] " -n 1 -r; echo; [[ $REPLY =~ ^[Yy]$ ]] && to_install+=("${module}"); } || log_info "Skipping ${module}"
-        else to_install+=("${module}"); fi
+        else
+            to_install+=("${module}")
+        fi
     done
     MODULES_TO_INSTALL=("${to_install[@]}")
     [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
@@ -671,7 +544,15 @@ EOF
     local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
         ((current++)); show_progress "${current}" "${total}" "${module}"; echo
-        if execute_module "${module}"; then log_success "Module ${module} completed"; else log_error "Module ${module} failed"; failed+=("${module}"); [[ "${non_interactive}" == "true" ]] && die "Module ${module} failed in non-interactive mode"; read -rp "Continue? [Y/n] " -n 1 -r; echo; [[ ! $REPLY =~ ^[Yy]$ ]] && break; fi
+        if execute_module "${module}"; then 
+            log_success "Module ${module} completed"
+        else 
+            log_error "Module ${module} failed"
+            failed+=("${module}")
+            [[ "${non_interactive}" == "true" ]] && die "Module ${module} failed in non-interactive mode"
+            read -rp "Continue? [Y/n] " -n 1 -r; echo
+            [[ ! $REPLY =~ ^[Yy]$ ]] && break
+        fi
     done
     show_summary
     [[ ${#failed[@]} -gt 0 ]] && { log_warn "Failed modules: ${failed[*]}"; exit 1; }

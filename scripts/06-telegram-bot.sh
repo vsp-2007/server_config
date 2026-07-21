@@ -39,7 +39,7 @@ echo "Configuring Systemd Service..."
 cp "$SERVICE_SRC" "$SERVICE_DEST"
 
 # Dynamic Config Path Injection
-# Using the absolute path of the current directory where the script is run (should be the Interactive-server_config_script root containing setup.conf)
+# Using the absolute path of the current directory where the script is run (should be the InitOps root containing setup.conf)
 REAL_CONFIG="$(pwd)/setup.conf"
 echo "Updating EnvironmentFile path to: $REAL_CONFIG"
 sed -i "s|EnvironmentFile=.*|EnvironmentFile=$REAL_CONFIG|" "$SERVICE_DEST"

@@ -195,8 +195,11 @@ validate_ip_cidr() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]]; 
 
 validate_config() {
     local errors=0
-    [[ -z "${PI_USER:-}" ]] && { log_error "Required variable PI_USER is not set"; ((errors++)); }
-    [[ -n "${PI_USER:-}" ]] && ! validate_username "${PI_USER}" && { log_error "PI_USER must be lowercase alphanumeric with underscores/hyphens"; ((errors++)); }
+    # Only validate PI_USER if set
+    if [[ -n "${PI_USER:-}" ]] && ! validate_username "${PI_USER}"; then
+        log_error "PI_USER must be lowercase alphanumeric with underscores/hyphens"
+        ((errors++))
+    fi
     
     local pass_vars=("PI_PASSWORD" "GRAFANA_ADMIN_PASSWORD" "PIHOLE_PASSWORD" "SMB_PASSWORD")
     for var in "${pass_vars[@]}"; do [[ -n "${!var:-}" ]] && ! validate_password "${!var}" && log_warn "${var} should be at least 8 characters"; done
@@ -226,6 +229,7 @@ prompt_missing_config() {
     echo "Missing required values will be prompted. Press Enter to use defaults or generate random values." >&2
     echo >&2
     
+    # Helper: prompt with validation
     prompt_with_validation() {
         local var_name="$1" prompt_text="$2" validator="$3" default="$4" is_secret="$5"
         local value
@@ -244,50 +248,107 @@ prompt_missing_config() {
         save_config_var "${var_name}" "${value}" "${config_file}"
     }
     
-    [[ -z "${PI_USER:-}" ]] && prompt_with_validation PI_USER "Enter system username" validate_username "piadmin" false
-    
-    [[ -z "${PI_PASSWORD:-}" ]] && prompt_with_validation PI_PASSWORD "Enter password for ${PI_USER} (min 8 chars, empty for random)" validate_password "" true
-    [[ -z "${PI_PASSWORD}" ]] && { PI_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random password for ${PI_USER}"; save_config_var "PI_PASSWORD" "${PI_PASSWORD}" "${config_file}"; }
-    
-    [[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && prompt_with_validation GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password (min 8 chars, empty for random)" validate_password "" true
-    [[ -z "${GRAFANA_ADMIN_PASSWORD}" ]] && { GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Grafana password"; save_config_var "GRAFANA_ADMIN_PASSWORD" "${GRAFANA_ADMIN_PASSWORD}" "${config_file}"; }
-    
-    [[ -z "${PIHOLE_PASSWORD:-}" ]] && prompt_with_validation PIHOLE_PASSWORD "Enter Pi-hole admin password (min 8 chars, empty for random)" validate_password "" true
-    [[ -z "${PIHOLE_PASSWORD}" ]] && { PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Pi-hole password"; save_config_var "PIHOLE_PASSWORD" "${PIHOLE_PASSWORD}" "${config_file}"; }
-    
-    [[ -z "${SMB_PASSWORD:-}" ]] && prompt_with_validation SMB_PASSWORD "Enter Samba password for ${SMB_USER:-smbuser} (min 8 chars, empty for random)" validate_password "" true
-    [[ -z "${SMB_PASSWORD}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Samba password"; save_config_var "SMB_PASSWORD" "${SMB_PASSWORD}" "${config_file}"; }
-    
-    echo -e "\n${CYAN}--- Telegram Bot Configuration (Optional) ---${NC}" >&2
-    if [[ -z "${TELEGRAM_ADMIN_TOKEN:-}" ]]; then
-        read -rp "Enter Telegram Admin Bot Token (from @BotFather, or press Enter to skip): " TELEGRAM_ADMIN_TOKEN >&2
-        [[ -n "${TELEGRAM_ADMIN_TOKEN}" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "${TELEGRAM_ADMIN_TOKEN}" "${config_file}"
+    # === OPTIONAL: System User (PI_USER) ===
+    echo -e "\n${CYAN}=== System User (Optional) ===${NC}" >&2
+    echo "Create an additional sudo user? Press Enter to skip (use existing root/sudo user)." >&2
+    read -rp "Enter system username (or press Enter to skip): " PI_USER >&2
+    PI_USER="${PI_USER:-}"  # Empty if user pressed Enter
+    if [[ -n "${PI_USER}" ]]; then
+        while ! validate_username "${PI_USER}"; do
+            log_warn "Invalid username. Use lowercase alphanumeric with underscores/hyphens."
+            read -rp "Enter system username: " PI_USER >&2
+        done
+        save_config_var "PI_USER" "${PI_USER}" "${config_file}"
+        
+        # Password (optional)
+        read -rsp "Enter password for ${PI_USER} (min 8 chars, empty for key-only auth): " PI_PASSWORD; echo >&2
+        if [[ -z "${PI_PASSWORD}" ]]; then
+            log_info "No password set - key-only authentication"
+            PI_PASSWORD=""
+        else
+            while ! validate_password "${PI_PASSWORD}"; do
+                log_warn "Password must be at least 8 characters"
+                read -rsp "Enter password for ${PI_USER}: " PI_PASSWORD; echo >&2
+            done
+        fi
+        save_config_var "PI_PASSWORD" "${PI_PASSWORD}" "${config_file}"
+        
+        # SSH keys
+        read -rp "Enter SSH public keys for ${PI_USER} (or press Enter to skip): " PI_SSH_KEYS >&2
+        save_config_var "PI_SSH_KEYS" "${PI_SSH_KEYS}" "${config_file}"
+    else
+        PI_USER=""
+        save_config_var "PI_USER" "" "${config_file}"
+        log_info "Skipping additional user creation"
     fi
-    if [[ -n "${TELEGRAM_ADMIN_TOKEN:-}" && -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]]; then
-        read -rp "Enter Telegram Admin Chat ID (your user ID from @userinfobot): " TELEGRAM_ADMIN_CHAT_ID >&2
+    
+    # === SSH Settings ===
+    read -rp "SSH port [22]: " SSH_PORT >&2; SSH_PORT="${SSH_PORT:-22}"
+    save_config_var "SSH_PORT" "${SSH_PORT}" "${config_file}"
+    
+    read -rp "Allow SSH root login? [no]: " SSH_PERMIT_ROOT_LOGIN >&2; SSH_PERMIT_ROOT_LOGIN="${SSH_PERMIT_ROOT_LOGIN:-no}"
+    save_config_var "SSH_PERMIT_ROOT_LOGIN" "${SSH_PERMIT_ROOT_LOGIN}" "${config_file}"
+    
+    read -rp "Allow SSH password authentication? [no]: " SSH_PASSWORD_AUTH >&2; SSH_PASSWORD_AUTH="${SSH_PASSWORD_AUTH:-no}"
+    save_config_var "SSH_PASSWORD_AUTH" "${SSH_PASSWORD_AUTH}" "${config_file}"
+    
+    # === Optional Passwords (with defaults for services that have them) ===
+    echo -e "\n${CYAN}=== Service Passwords (Optional - press Enter for defaults) ===${NC}" >&2
+    
+    # Grafana - default admin/admin
+    read -rp "Grafana admin password (default: admin) [admin]: " GRAFANA_ADMIN_PASSWORD >&2
+    GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-admin}"
+    save_config_var "GRAFANA_ADMIN_PASSWORD" "${GRAFANA_ADMIN_PASSWORD}" "${config_file}"
+    
+    # Pi-hole - required for web UI
+    read -rp "Pi-hole admin password (min 8 chars, empty for random): " PIHOLE_PASSWORD >&2
+    if [[ -z "${PIHOLE_PASSWORD}" ]]; then
+        PIHOLE_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+        log_info "Generated random Pi-hole password"
+    fi
+    while ! validate_password "${PIHOLE_PASSWORD}"; do
+        log_warn "Password must be at least 8 characters"
+        read -rp "Pi-hole admin password: " PIHOLE_PASSWORD >&2
+    done
+    save_config_var "PIHOLE_PASSWORD" "${PIHOLE_PASSWORD}" "${config_file}"
+    
+    # Samba
+    read -rp "Samba password for ${SMB_USER:-smbuser} (min 8 chars, empty for random): " SMB_PASSWORD >&2
+    if [[ -z "${SMB_PASSWORD}" ]]; then
+        SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+        log_info "Generated random Samba password"
+    fi
+    while ! validate_password "${SMB_PASSWORD}"; do
+        log_warn "Password must be at least 8 characters"
+        read -rp "Samba password: " SMB_PASSWORD >&2
+    done
+    save_config_var "SMB_PASSWORD" "${SMB_PASSWORD}" "${config_file}"
+    
+    # === Telegram Bot Configuration (Optional) ===
+    echo -e "\n${CYAN}--- Telegram Bot Configuration (Optional) ---${NC}" >&2
+    read -rp "Telegram Admin Bot Token (from @BotFather, press Enter to skip): " TELEGRAM_ADMIN_TOKEN >&2
+    [[ -n "${TELEGRAM_ADMIN_TOKEN}" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "${TELEGRAM_ADMIN_TOKEN}" "${config_file}"
+    if [[ -n "${TELEGRAM_ADMIN_TOKEN:-}" ]]; then
+        read -rp "Telegram Admin Chat ID (your user ID from @userinfobot): " TELEGRAM_ADMIN_CHAT_ID >&2
         [[ -n "${TELEGRAM_ADMIN_CHAT_ID}" ]] && save_config_var "TELEGRAM_ADMIN_CHAT_ID" "${TELEGRAM_ADMIN_CHAT_ID}" "${config_file}"
     fi
     
-    if [[ -z "${TELEGRAM_USER_TOKEN:-}" ]]; then
-        read -rp "Enter Telegram User Bot Token (for group status, or press Enter to skip): " TELEGRAM_USER_TOKEN >&2
-        [[ -n "${TELEGRAM_USER_TOKEN}" ]] && save_config_var "TELEGRAM_USER_TOKEN" "${TELEGRAM_USER_TOKEN}" "${config_file}"
-    fi
-    if [[ -n "${TELEGRAM_USER_TOKEN:-}" && -z "${TELEGRAM_USER_CHAT_ID:-}" ]]; then
-        read -rp "Enter Telegram User Bot Chat ID (group ID, negative number): " TELEGRAM_USER_CHAT_ID >&2
+    read -rp "Telegram User Bot Token (for group status, press Enter to skip): " TELEGRAM_USER_TOKEN >&2
+    [[ -n "${TELEGRAM_USER_TOKEN}" ]] && save_config_var "TELEGRAM_USER_TOKEN" "${TELEGRAM_USER_TOKEN}" "${config_file}"
+    if [[ -n "${TELEGRAM_USER_TOKEN:-}" ]]; then
+        read -rp "Telegram User Bot Chat ID (group ID, negative number): " TELEGRAM_USER_CHAT_ID >&2
         [[ -n "${TELEGRAM_USER_CHAT_ID}" ]] && save_config_var "TELEGRAM_USER_CHAT_ID" "${TELEGRAM_USER_CHAT_ID}" "${config_file}"
     fi
     
-    if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
-        read -rp "Enter Tailscale Auth Key (or press Enter for interactive login): " TAILSCALE_AUTH_KEY >&2
-        [[ -n "${TAILSCALE_AUTH_KEY}" ]] && save_config_var "TAILSCALE_AUTH_KEY" "${TAILSCALE_AUTH_KEY}" "${config_file}"
-    fi
+    # === Tailscale ===
+    read -rp "Tailscale Auth Key (press Enter for interactive login): " TAILSCALE_AUTH_KEY >&2
+    [[ -n "${TAILSCALE_AUTH_KEY}" ]] && save_config_var "TAILSCALE_AUTH_KEY" "${TAILSCALE_AUTH_KEY}" "${config_file}"
     
-    if [[ -z "${STATIC_IP:-}" ]]; then
-        read -rp "Enter Static IP with CIDR (e.g., 192.168.1.100/24, or press Enter for DHCP): " STATIC_IP >&2
-        [[ -n "${STATIC_IP}" ]] && save_config_var "STATIC_IP" "${STATIC_IP}" "${config_file}"
-    fi
+    # === Static IP (Optional) ===
+    read -rp "Static IP with CIDR (e.g., 192.168.1.100/24, press Enter for DHCP): " STATIC_IP >&2
+    [[ -n "${STATIC_IP}" ]] && save_config_var "STATIC_IP" "${STATIC_IP}" "${config_file}"
     if [[ -n "${STATIC_IP:-}" && -z "${STATIC_GATEWAY:-}" ]]; then
-        read -rp "Enter Gateway IP (router IP): " STATIC_GATEWAY >&2
+        read -rp "Gateway IP (router IP): " STATIC_GATEWAY >&2
         [[ -n "${STATIC_GATEWAY}" ]] && save_config_var "STATIC_GATEWAY" "${STATIC_GATEWAY}" "${config_file}"
     fi
     
@@ -404,17 +465,17 @@ generate_summary() {
         if [[ -f "${STATE_DIR}/${module}.installed" ]]; then
             summary+="✓ ${module}\n"
             case "${module}" in
-                system) summary+="    SSH: ssh ${PI_USER}@${ip}\n    VNC: ${ip}:5900\n" ;;
+                system) summary+="    SSH: ssh \${PI_USER:-\$USER}@\${ip}\n    VNC: \${ip}:5900\n" ;;
                 network) summary+="    Tailscale: Connected\n" ;;
-                pihole) summary+="    Web UI: http://${ip}/admin\n    Password: ${PIHOLE_PASSWORD}\n" ;;
-                monitoring) summary+="    Prometheus: http://${ip}:9090\n    Grafana: http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})\n    Alertmanager: http://${ip}:9093\n" ;;
-                samba) summary+="    Webmin: https://${ip}:10000\n    Samba: \\\\\\\\${ip}\\\\${SMB_SHARE_NAME:-pishare}\n" ;;
+                pihole) summary+="    Web UI: http://\${ip}/admin\n    Password: \${PIHOLE_PASSWORD}\n" ;;
+                monitoring) summary+="    Prometheus: http://\${ip}:9090\n    Grafana: http://\${ip}:3000 (admin / \${GRAFANA_ADMIN_PASSWORD})\n    Alertmanager: http://\${ip}:9093\n" ;;
+                samba) summary+="    Webmin: https://\${ip}:10000\n    Samba: \\\\\\\${ip}\\\\\${SMB_SHARE_NAME:-pishare}\n" ;;
                 telegram) summary+="    Service: telegram-bot.service\n" ;;
                 localsend) summary+="    Port: 53317\n" ;;
-                stirling) summary+="    URL: http://${ip}:8080\n" ;;
-                nginx) summary+="    Domains: dashboard.home, pi.home, n8n.home, etc.\n    Configure DNS in Pi-hole: http://${ip}:8081/admin/dns_records.php\n" ;;
-                cockpit) summary+="    URL: https://${ip}:9091\n" ;;
-                n8n) summary+="    URL: http://${ip}:5678 (or http://n8n.home)\n" ;;
+                stirling) summary+="    URL: http://\${ip}:8080\n" ;;
+                nginx) summary+="    Domains: dashboard.home, pi.home, n8n.home, etc.\n    Configure DNS in Pi-hole: http://\${ip}:8081/admin/dns_records.php\n" ;;
+                cockpit) summary+="    URL: https://\${ip}:9091\n" ;;
+                n8n) summary+="    URL: http://\${ip}:5678 (or http://n8n.home)\n" ;;
             esac
             summary+="\n"
         else

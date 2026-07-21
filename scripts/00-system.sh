@@ -1,6 +1,6 @@
 #!/bin/bash
 # System Basics Module - Pi Server Setup v2 (Platform-agnostic)
-# Updates, user creation, SSH hardening, essential tools, security hardening
+# Updates, optional user creation, SSH hardening, essential tools, security hardening
 
 set -euo pipefail
 
@@ -9,9 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/../lib/platform.sh" 2>/dev/null || true
 
-# Configuration variables (with defaults)
-PI_USER="${PI_USER:-piadmin}"
-PI_PASSWORD="${PI_PASSWORD:-}"
+# Configuration variables (all optional)
+PI_USER="${PI_USER:-}"              # Empty = don't create additional user
+PI_PASSWORD="${PI_PASSWORD:-}"      # Empty = no password (key-only auth)
 PI_SSH_KEYS="${PI_SSH_KEYS:-}"
 SSH_PORT="${SSH_PORT:-22}"
 SSH_PERMIT_ROOT_LOGIN="${SSH_PERMIT_ROOT_LOGIN:-no}"
@@ -37,8 +37,12 @@ main() {
     # 2. Install Essential Packages
     install_essential_packages
     
-    # 3. Create/Configure System User
-    setup_system_user
+    # 3. Create/Configure System User (OPTIONAL - only if PI_USER is set)
+    if [[ -n "${PI_USER}" ]]; then
+        setup_system_user
+    else
+        log_info "PI_USER not set, skipping additional user creation"
+    fi
     
     # 4. Configure SSH Hardening
     configure_ssh
@@ -169,7 +173,7 @@ install_modern_tools() {
 }
 
 setup_system_user() {
-    log_info "Setting up system user: ${PI_USER}"
+    log_info "Setting up optional system user: ${PI_USER}"
     
     # Check if user exists
     if id "${PI_USER}" &>/dev/null; then
@@ -183,12 +187,14 @@ setup_system_user() {
         
         useradd -m -s /bin/bash -G "${extra_groups}" "${PI_USER}"
         
-        # Set password
+        # Set password (optional - if empty, key-only auth)
         if [[ -n "${PI_PASSWORD}" ]]; then
             echo "${PI_USER}:${PI_PASSWORD}" | chpasswd
             log_success "Password set for ${PI_USER}"
         else
-            log_warn "No password set for ${PI_USER}. Set one with: passwd ${PI_USER}"
+            log_info "No password set for ${PI_USER} (key-only authentication)"
+            # Lock password to force key auth
+            passwd -l "${PI_USER}" 2>/dev/null || true
         fi
     fi
     
@@ -204,7 +210,7 @@ setup_system_user() {
     # Add user to docker group if docker exists
     usermod -aG docker "${PI_USER}" 2>/dev/null || true
     
-    log_success "System user configured"
+    log_success "Optional system user configured"
 }
 
 setup_ssh_keys() {
@@ -266,8 +272,8 @@ configure_ssh() {
     for setting in "${settings[@]}"; do
         local key="${setting%% *}"
         local value="${setting#* }"
-        if grep -q "^#\?${key}" "${sshd_config}"; then
-            sed -i "s/^#\?${key}.*/${key} ${value}/" "${sshd_config}"
+        if grep -q "^#\\?${key}" "${sshd_config}"; then
+            sed -i "s/^#\\?${key}.*/${key} ${value}/" "${sshd_config}"
         else
             echo "${key} ${value}" >> "${sshd_config}"
         fi

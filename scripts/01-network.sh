@@ -90,11 +90,20 @@ setup_tailscale() {
 
     # Authenticate
     if [[ -n "${TAILSCALE_AUTH_KEY}" ]]; then
-        log_info "Authenticating with auth key..."
+        log_info "Authenticating with provided auth key..."
         tailscale up "${ts_args[@]}" --authkey="${TAILSCALE_AUTH_KEY}"
     else
         log_info "Starting interactive authentication..."
-        echo "A browser window will open for authentication."
+        log_info "A browser window will open for authentication."
+        
+        # Try to open browser automatically for headless servers with DISPLAY or on desktop
+        if [[ -n "${DISPLAY:-}" ]] || [[ "${XDG_CURRENT_DESKTOP:-}" != "" ]] || [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+            # Desktop environment detected - tailscale will open browser automatically
+            log_info "Desktop environment detected - Tailscale will open browser automatically"
+        else
+            log_info "No desktop environment detected. If browser doesn't open, copy the URL from output."
+        fi
+        
         tailscale up "${ts_args[@]}"
     fi
 
@@ -153,11 +162,11 @@ configure_static_ip() {
         return 0
     fi
 
-    log_warn "=================================================================="
+    log_warn "================================================================"
     log_warn "WARNING: Configuring static IP remotely can disconnect you!"
     log_warn "It is STRONGLY recommended to set a DHCP reservation in your"
     log_warn "router instead of configuring static IP on the device."
-    log_warn "=================================================================="
+    log_warn "================================================================"
 
     if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
         read -rp "Are you sure you want to configure static IP on this device? [y/N] " -n 1 -r

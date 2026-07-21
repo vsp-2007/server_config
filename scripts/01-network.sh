@@ -32,7 +32,7 @@ STATIC_GATEWAY="${STATIC_GATEWAY:-}"
 STATIC_DNS="${STATIC_DNS:-1.1.1.1}"
 
 # State tracking for idempotency
-STATE_DIR="/var/lib/Interactive-server_config_script/state"
+STATE_DIR="/var/lib/InitOps/state"
 NETWORK_STATE_FILE="${STATE_DIR}/network.state"
 
 mkdir -p "${STATE_DIR}"
@@ -441,7 +441,7 @@ configure_static_ip() {
     # Append new configuration
     cat >> /etc/dhcpcd.conf <<EOF
 
-# Static IP Configuration by Interactive-server_config_script
+# Static IP Configuration by InitOps
 interface ${interface}
 static ip_address=${ip_addr}/${cidr}
 static routers=${gateway}

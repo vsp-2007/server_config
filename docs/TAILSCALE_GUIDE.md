@@ -40,7 +40,7 @@ Tailscale is a zero-configuration VPN built on WireGuard. It provides:
 2. Navigate to **Settings** → **Auth Keys**
 3. Click **Generate Auth Key**
 4. Configure:
-   - **Description:** `Interactive-server_config_script`
+   - **Description:** `InitOps`
    - **Expiry:** No expiry (or set as needed)
    - **Reusable:** Yes
    - **Ephemeral:** No
@@ -129,7 +129,7 @@ For security, restrict which devices can access what:
 
 ## Step 7: Install on Your Pi
 
-Run the Interactive-server_config_script script with network module:
+Run the InitOps script with network module:
 
 ```bash
 # Interactive (will prompt for auth key if not in settings.conf)
@@ -255,4 +255,4 @@ If switching from Pangolin:
 
 ---
 
-*This guide is part of Pi Server Setup v3 - https://github.com/vsp-2007/Interactive-server_config_script*
+*This guide is part of Pi Server Setup v3 - https://github.com/vsp-2007/InitOps*

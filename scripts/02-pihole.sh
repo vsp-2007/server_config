@@ -165,7 +165,7 @@ configure_blocklists() {
         
         # Check if already exists
         if sqlite3 "${gravity_db}" "SELECT COUNT(*) FROM adlist WHERE address = '${url}';" | grep -q "^0$"; then
-            sqlite3 "${gravity_db}" "INSERT INTO adlist (address, enabled, comment) VALUES ('${url}', 1, 'Added by Interactive-server_config_script');"
+            sqlite3 "${gravity_db}" "INSERT INTO adlist (address, enabled, comment) VALUES ('${url}', 1, 'Added by InitOps');"
             log_debug "Added blocklist: ${url}"
         else
             log_debug "Blocklist already exists: ${url}"

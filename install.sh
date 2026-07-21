@@ -539,7 +539,7 @@ check_module_installed() {
     case "${module}" in
         system)   command -v btop >/dev/null && systemctl is-active --quiet ssh ;;
         network)  (command -v tailscale >/dev/null && tailscale status >/dev/null 2>&1) || (command -v pangolin >/dev/null && pangolin status >/dev/null 2>&1) ;;
-        pihole)   command -v pihole >/dev/null ;;
+        pihole)   command -v pihole >/dev/null && systemctl is-active --quiet pihole-FTL ;;
         monitoring) systemctl is-active --quiet prometheus && systemctl is-active --quiet grafana-server ;;
         samba)    systemctl is-active --quiet smbd ;;
         utils)    [[ -f /usr/local/bin/send_report.sh ]] ;;

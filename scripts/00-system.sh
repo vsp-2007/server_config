@@ -238,7 +238,7 @@ configure_ssh() {
     log_info "Configuring SSH hardening..."
     
     local sshd_config="/etc/ssh/sshd_config"
-    local backup_file="${BACKUP_DIR:-/var/lib/Interactive-server_config_script/backups}/sshd_config.$(date +%Y%m%d_%H%M%S).bak"
+    local backup_file="${BACKUP_DIR:-/var/lib/InitOps/backups}/sshd_config.$(date +%Y%m%d_%H%M%S).bak"
     
     mkdir -p "$(dirname "${backup_file}")"
     cp "${sshd_config}" "${backup_file}"

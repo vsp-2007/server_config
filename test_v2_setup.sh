@@ -18,9 +18,9 @@ log_success() { echo -e "${GREEN}[PASS]${NC} $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error()   { echo -e "${RED}[FAIL]${NC} $*"; }
 
-REPO_DIR="$HOME/Interactive-server_config_script"
+REPO_DIR="$HOME/InitOps"
 BRANCH="v2-development"
-REPO_URL="https://github.com/vsp-2007/Interactive-server_config_script.git"
+REPO_URL="https://github.com/vsp-2007/InitOps.git"
 
 echo -e "${BOLD}${CYAN}=== Pi Server Setup v2 Test Script ===${NC}"
 echo "Repository: $REPO_URL"
@@ -125,8 +125,8 @@ phase3_cli_test() {
     fi
     
     # Check log file was created
-    if [[ -f /var/log/Interactive-server_config_script/install_*.log ]]; then
-        log_success "Log file created in /var/log/Interactive-server_config_script/"
+    if [[ -f /var/log/InitOps/install_*.log ]]; then
+        log_success "Log file created in /var/log/InitOps/"
     else
         log_warn "Log file not found in expected location"
     fi
@@ -215,7 +215,7 @@ main() {
     echo
     echo -e "${BOLD}${GREEN}=== All Tests Completed ===${NC}"
     echo "Check output above for any failures."
-    echo "Log files in /var/log/Interactive-server_config_script/"
+    echo "Log files in /var/log/InitOps/"
 }
 
 main "$@"

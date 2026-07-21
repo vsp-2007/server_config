@@ -24,8 +24,8 @@ Thank you for your interest in contributing! This project aims to provide a secu
 
 ```bash
 # Fork and clone your fork
-git clone https://github.com/your-username/Interactive-server_config_script.git
-cd Interactive-server_config_script
+git clone https://github.com/your-username/InitOps.git
+cd InitOps
 
 # Install development tools
 sudo apt-get install shellcheck yamllint python3-yaml
@@ -201,8 +201,8 @@ Maintainers only:
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/vsp-2007/Interactive-server_config_script/discussions)
-- Check existing [Issues](https://github.com/vsp-2007/Interactive-server_config_script/issues)
+- Open a [Discussion](https://github.com/vsp-2007/InitOps/discussions)
+- Check existing [Issues](https://github.com/vsp-2007/InitOps/issues)
 - Review [Security Policy](SECURITY.md) for vulnerability reporting
 
 ---

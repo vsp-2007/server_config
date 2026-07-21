@@ -2,11 +2,11 @@
 
 > **Transform any Debian 13+ machine (Raspberry Pi, laptop, VM, server) into a production-ready, observable, and secure home server.**
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/vsp-2007/Interactive-server_config_script)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/vsp-2007/InitOps)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%2013%20(Trixie)%20%7C%2012%20(Bookworm)-red)](https://www.debian.org/releases/)
 [![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7-orange)]()
-[![CI](https://github.com/vsp-2007/Interactive-server_config_script/workflows/CI/badge.svg)](https://github.com/vsp-2007/Interactive-server_config_script/actions)
+[![CI](https://github.com/vsp-2007/InitOps/workflows/CI/badge.svg)](https://github.com/vsp-2007/InitOps/actions)
 
 ---
 
@@ -88,8 +88,8 @@
 
 ```bash
 # 1. Clone the development branch
-git clone -b v2-development https://github.com/vsp-2007/Interactive-server_config_script.git
-cd Interactive-server_config_script
+git clone -b v2-development https://github.com/vsp-2007/InitOps.git
+cd InitOps
 
 # 2. Copy and configure settings
 cp config/settings.conf.example settings.conf
@@ -313,7 +313,7 @@ ssh -p 2222 piadmin@<IP>
 systemd-analyze security telegram-bot.service
 
 # Verify config permissions
-stat -c "%a %n" settings.conf /etc/Interactive-server_config_script/settings.conf
+stat -c "%a %n" settings.conf /etc/InitOps/settings.conf
 
 # Check firewall
 ufw status verbose
@@ -359,7 +359,7 @@ tar -czf pi-server-backup-$(date +%Y%m%d).tar.gz \
 
 ```bash
 # Installer log
-tail -f /var/log/Interactive-server_config_script/install_*.log
+tail -f /var/log/InitOps/install_*.log
 
 # Service logs
 journalctl -u prometheus -f
@@ -426,8 +426,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/vsp-2007/Interactive-server_config_script/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/vsp-2007/Interactive-server_config_script/discussions)
+- **Issues**: [GitHub Issues](https://github.com/vsp-2007/InitOps/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/vsp-2007/InitOps/discussions)
 - **Security**: See [SECURITY.md](SECURITY.md) for responsible disclosure
 
 ---

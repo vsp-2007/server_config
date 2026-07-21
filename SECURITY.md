@@ -13,7 +13,7 @@
 
 Instead, report them through one of these channels:
 
-1. **GitHub Security Advisories** (Preferred): [Open a Security Advisory](https://github.com/vsp-2007/Interactive-server_config_script/security/advisories/new)
+1. **GitHub Security Advisories** (Preferred): [Open a Security Advisory](https://github.com/vsp-2007/InitOps/security/advisories/new)
 2. **Email**: security@your-domain.com (replace with actual)
 3. **Encrypted Email**: Use our PGP key from [KEYBASE](https://keybase.io/your-username) (replace with actual)
 
@@ -73,7 +73,7 @@ SystemCallErrorNumber=EPERM
 ### Secret Management
 
 - Configuration file: `settings.conf` (chmod 600, root only)
-- Service environment files: `/etc/Interactive-server_config_script/*.conf` (chmod 640, root:service-user)
+- Service environment files: `/etc/InitOps/*.conf` (chmod 640, root:service-user)
 - Telegram bot tokens: Stored in config, loaded via EnvironmentFile
 - No secrets in git history (enforced by .gitignore)
 
@@ -113,7 +113,7 @@ Post-installation verification:
 - [ ] Fail2Ban active with SSH, nginx, Pi-hole, Webmin jails (`fail2ban-client status`)
 - [ ] All services running as non-root users (`systemd-analyze security <service>`)
 - [ ] Systemd hardening applied (`systemd-analyze security telegram-bot.service`)
-- [ ] Config files at 600/640 permissions (`stat -c "%a %n" settings.conf /etc/Interactive-server_config_script/*.conf`)
+- [ ] Config files at 600/640 permissions (`stat -c "%a %n" settings.conf /etc/InitOps/*.conf`)
 - [ ] Telegram bot audit logging working (`tail /var/log/pi-server-bot/audit.log`)
 - [ ] Tailscale MagicDNS + Global Nameserver configured
 - [ ] Unattended upgrades enabled (`systemctl status unattended-upgrades`)
@@ -161,7 +161,7 @@ Critical vulnerabilities (CVSS ≥ 9.0) may receive expedited timelines.
 
 - Enable `UNATTENDED_UPGRADES="true"` in settings.conf
 - Monitor GitHub Security Advisories for this repo
-- Subscribe to [releases](https://github.com/vsp-2007/Interactive-server_config_script/releases) for updates
+- Subscribe to [releases](https://github.com/vsp-2007/InitOps/releases) for updates
 - Run `sudo ./install.sh -y` periodically to apply updates
 
 ## Contact

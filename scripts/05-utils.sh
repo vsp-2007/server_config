@@ -227,8 +227,8 @@ EOF
 configure_logrotate() {
     log_info "Configuring logrotate for project logs..."
     
-    cat > /etc/logrotate.d/Interactive-server_config_script <<EOF
-/var/log/Interactive-server_config_script/*.log {
+    cat > /etc/logrotate.d/InitOps <<EOF
+/var/log/InitOps/*.log {
     daily
     missingok
     rotate 14

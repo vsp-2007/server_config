@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explores GUI implementation options for the Interactive-server_config_script project, allowing users to configure and run the installer through a graphical interface instead of CLI-only interaction.
+This document explores GUI implementation options for the InitOps project, allowing users to configure and run the installer through a graphical interface instead of CLI-only interaction.
 
 ---
 
@@ -130,7 +130,7 @@ fi
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Interactive-server_config_script v2 GUI                   │
+│                    InitOps v2 GUI                   │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
@@ -449,7 +449,7 @@ async fn run_install(modules: Vec<String>, config: serde_json::Value) -> Result<
 ## File Structure for GUI Implementation
 
 ```
-Interactive-server_config_script/
+InitOps/
 ├── install.sh                 # Main CLI (supports --tui, --gui)
 ├── scripts/
 │   ├── gui/
@@ -525,7 +525,7 @@ sudo ./install.sh --gui              # Starts web server, prints URL
 ### Desktop (Phase 3 - Future)
 ```bash
 # Download .AppImage/.dmg/.msi
-Interactive-server_config_script-gui                  # Native desktop app
+InitOps-gui                  # Native desktop app
 ```
 
 ---

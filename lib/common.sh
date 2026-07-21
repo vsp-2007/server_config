@@ -1,5 +1,5 @@
 #!/bin/bash
-# Common library functions for Interactive-server_config_script scripts
+# Common library functions for InitOps scripts
 # Source this in your scripts: source "${SCRIPT_DIR}/../lib/common.sh"
 
 set -euo pipefail
@@ -188,7 +188,7 @@ retry_command() {
 # Backup file with timestamp
 backup_file() {
     local file="$1"
-    local backup_dir="${BACKUP_DIR:-/var/lib/Interactive-server_config_script/backups}"
+    local backup_dir="${BACKUP_DIR:-/var/lib/InitOps/backups}"
     
     if [[ -f "${file}" ]]; then
         mkdir -p "${backup_dir}"

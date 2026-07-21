@@ -7,7 +7,7 @@
 - **OS**: Debian 13 (Trixie) - Linux 6.12.95+deb13-amd64
 
 ## Current State
-- Repository cloned to `~/Interactive-server_config_script`
+- Repository cloned to `~/InitOps`
 - install.sh exists but may need chmod +x
 - settings.conf not yet created (needs copy from config/settings.conf.example)
 - Git branch: v2-development
@@ -45,7 +45,7 @@
 
 ```bash
 # 1. Setup
-cd ~/Interactive-server_config_script
+cd ~/InitOps
 chmod +x install.sh
 ls -la config/settings.conf.example
 

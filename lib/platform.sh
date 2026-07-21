@@ -15,7 +15,7 @@ DISTRO_VERSION=""
 DISTRO_CODENAME=""
 
 # State tracking for idempotency (backported from v3)
-STATE_DIR="/var/lib/Interactive-server_config_script/state"
+STATE_DIR="/var/lib/InitOps/state"
 mkdir -p "${STATE_DIR}" 2>/dev/null || true
 
 is_configured() {

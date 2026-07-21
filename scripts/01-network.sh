@@ -217,7 +217,7 @@ configure_static_ip() {
     # Append new configuration
     cat >> /etc/dhcpcd.conf <<EOF
 
-# Static IP Configuration by Interactive-server_config_script
+# Static IP Configuration by InitOps
 interface ${interface}
 static ip_address=${ip_addr}/${cidr}
 static routers=${gateway}

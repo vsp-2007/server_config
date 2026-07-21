@@ -78,7 +78,7 @@ declare -A MODULE_SCRIPTS=(
 )
 
 # ============================================================================
-# LOGGING FUNCTIONS (safe - won't fail if log dir missing)
+# LOGGING FUNCTIONS (always print to stderr for visibility)
 # ============================================================================
 _log() {
     local level="$1"; shift
@@ -86,8 +86,10 @@ _log() {
     local timestamp; timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     local output="${timestamp} [${level}] ${msg}"
     
-    printf '%s\n' "${output}"
+    # ALWAYS print to stderr so user sees it
+    printf '%s\n' "${output}" >&2
     
+    # Also write to log file if directory exists
     [[ -d "${LOG_DIR}" ]] && printf '%s\n' "${output}" >> "${LOG_FILE}" 2>/dev/null || true
 }
 
@@ -97,11 +99,14 @@ log_warn()    { _log "WARN"    "${YELLOW}${*}${NC}"; }
 log_error()   { _log "ERROR"   "${RED}${*}${NC}"; }
 log_debug()   { [[ "${DEBUG:-false}" == "true" ]] && _log "DEBUG" "${DIM}${*}${NC}" || true; }
 
+# Fatal error with message
+die() { log_error "$*"; exit 1; }
+
 # Progress indicator
 show_progress() {
     local current="$1" total="$2" module="$3"
     local pct=$((current * 100 / total))
-    printf "\r${CYAN}[%d/%d]${NC} %-20s ${DIM}[%d%%]${NC}" "${current}" "${total}" "${module}" "${pct}"
+    printf "\r${CYAN}[%d/%d]${NC} %-20s ${DIM}[%d%%]${NC}" "${current}" "${total}" "${module}" "${pct}" >&2
 }
 
 # ============================================================================
@@ -126,13 +131,19 @@ get_module_state() {
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-die() { log_error "$*"; exit 1; }
-
-check_root() { [[ $EUID -ne 0 ]] && die "This script must be run as root (use sudo)"; }
+check_root() { 
+    if [[ $EUID -ne 0 ]]; then
+        die "This script must be run as root (use sudo)" 
+    fi
+    log_debug "Root check passed"
+}
 
 check_os() {
-    [[ ! -f /etc/os-release ]] && die "Cannot determine OS version"
+    if [[ ! -f /etc/os-release ]]; then
+        die "Cannot determine OS version - /etc/os-release missing"
+    fi
     source /etc/os-release
+    log_info "OS detected: ${PRETTY_NAME}"
     if [[ "${ID}" != "raspbian" && "${ID}" != "debian" && "${ID_LIKE:-}" != *"debian"* ]]; then
         log_warn "Designed for Debian-based OS. Current: ${PRETTY_NAME}"
         if [[ "${SKIP_OS_CHECK:-false}" != "true" ]]; then
@@ -140,7 +151,6 @@ check_os() {
             [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
         fi
     fi
-    log_info "OS: ${PRETTY_NAME}"
 }
 
 check_arch() {
@@ -151,7 +161,8 @@ check_arch() {
         x86_64|amd64)  ARCH="amd64" ;;
         *) die "Unsupported architecture: ${arch}" ;;
     esac
-    log_info "Architecture: ${ARCH}"; export ARCH
+    log_info "Architecture: ${ARCH}"
+    export ARCH
 }
 
 sanitize_config() {
@@ -162,10 +173,13 @@ sanitize_config() {
 
 load_config() {
     local config_file="$1"
-    [[ ! -f "${config_file}" ]] && die "Config file not found: ${config_file}\nCopy config/settings.conf.example to settings.conf"
+    [[ ! -f "${config_file}" ]] && die "Config file not found: ${config_file}"
     
     local perms; perms=$(stat -c "%a" "${config_file}" 2>/dev/null || stat -f "%A" "${config_file}" 2>/dev/null)
-    [[ "${perms}" != "600" && "${perms}" != "400" ]] && { log_warn "Config permissions loose (${perms}), fixing to 600"; chmod 600 "${config_file}"; }
+    if [[ "${perms}" != "600" && "${perms}" != "400" ]]; then
+        log_warn "Config permissions loose (${perms}), fixing to 600"
+        chmod 600 "${config_file}"
+    fi
     
     # shellcheck source=/dev/null
     source "${config_file}"
@@ -201,25 +215,25 @@ validate_config() {
 }
 
 # ============================================================================
-# INTERACTIVE CONFIGURATION PROMPTING
+# INTERACTIVE CONFIGURATION PROMPTING (auto-copies from template)
 # ============================================================================
 prompt_missing_config() {
     local config_file="$1"
     local non_interactive="${2:-false}"
     [[ "${non_interactive}" == "true" ]] && return 0
     
-    echo -e "\n${BOLD}${CYAN}=== Interactive Configuration ===${NC}"
-    echo "Missing required values will be prompted. Press Enter to use defaults or generate random values."
-    echo
+    echo -e "\n${BOLD}${CYAN}=== Interactive Configuration ===${NC}" >&2
+    echo "Missing required values will be prompted. Press Enter to use defaults or generate random values." >&2
+    echo >&2
     
     prompt_with_validation() {
         local var_name="$1" prompt_text="$2" validator="$3" default="$4" is_secret="$5"
         local value
         while true; do
             if [[ "${is_secret}" == "true" ]]; then
-                read -rsp "${prompt_text}: " value; echo
+                read -rsp "${prompt_text}: " value; echo >&2
             else
-                read -rp "${prompt_text} [${default}]: " value
+                read -rp "${prompt_text} [${default}]: " value >&2
                 value="${value:-${default}}"
             fi
             if [[ -z "${value}" && -n "${default}" ]]; then value="${default}"; break; fi
@@ -244,43 +258,43 @@ prompt_missing_config() {
     [[ -z "${SMB_PASSWORD:-}" ]] && prompt_with_validation SMB_PASSWORD "Enter Samba password for ${SMB_USER:-smbuser} (min 8 chars, empty for random)" validate_password "" true
     [[ -z "${SMB_PASSWORD}" ]] && { SMB_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16); log_info "Generated random Samba password"; save_config_var "SMB_PASSWORD" "${SMB_PASSWORD}" "${config_file}"; }
     
-    echo -e "\n${CYAN}--- Telegram Bot Configuration (Optional) ---${NC}"
+    echo -e "\n${CYAN}--- Telegram Bot Configuration (Optional) ---${NC}" >&2
     if [[ -z "${TELEGRAM_ADMIN_TOKEN:-}" ]]; then
-        read -rp "Enter Telegram Admin Bot Token (from @BotFather, or press Enter to skip): " TELEGRAM_ADMIN_TOKEN
+        read -rp "Enter Telegram Admin Bot Token (from @BotFather, or press Enter to skip): " TELEGRAM_ADMIN_TOKEN >&2
         [[ -n "${TELEGRAM_ADMIN_TOKEN}" ]] && save_config_var "TELEGRAM_ADMIN_TOKEN" "${TELEGRAM_ADMIN_TOKEN}" "${config_file}"
     fi
     if [[ -n "${TELEGRAM_ADMIN_TOKEN:-}" && -z "${TELEGRAM_ADMIN_CHAT_ID:-}" ]]; then
-        read -rp "Enter Telegram Admin Chat ID (your user ID from @userinfobot): " TELEGRAM_ADMIN_CHAT_ID
+        read -rp "Enter Telegram Admin Chat ID (your user ID from @userinfobot): " TELEGRAM_ADMIN_CHAT_ID >&2
         [[ -n "${TELEGRAM_ADMIN_CHAT_ID}" ]] && save_config_var "TELEGRAM_ADMIN_CHAT_ID" "${TELEGRAM_ADMIN_CHAT_ID}" "${config_file}"
     fi
     
     if [[ -z "${TELEGRAM_USER_TOKEN:-}" ]]; then
-        read -rp "Enter Telegram User Bot Token (for group status, or press Enter to skip): " TELEGRAM_USER_TOKEN
+        read -rp "Enter Telegram User Bot Token (for group status, or press Enter to skip): " TELEGRAM_USER_TOKEN >&2
         [[ -n "${TELEGRAM_USER_TOKEN}" ]] && save_config_var "TELEGRAM_USER_TOKEN" "${TELEGRAM_USER_TOKEN}" "${config_file}"
     fi
     if [[ -n "${TELEGRAM_USER_TOKEN:-}" && -z "${TELEGRAM_USER_CHAT_ID:-}" ]]; then
-        read -rp "Enter Telegram User Bot Chat ID (group ID, negative number): " TELEGRAM_USER_CHAT_ID
+        read -rp "Enter Telegram User Bot Chat ID (group ID, negative number): " TELEGRAM_USER_CHAT_ID >&2
         [[ -n "${TELEGRAM_USER_CHAT_ID}" ]] && save_config_var "TELEGRAM_USER_CHAT_ID" "${TELEGRAM_USER_CHAT_ID}" "${config_file}"
     fi
     
     if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
-        read -rp "Enter Tailscale Auth Key (or press Enter for interactive login): " TAILSCALE_AUTH_KEY
+        read -rp "Enter Tailscale Auth Key (or press Enter for interactive login): " TAILSCALE_AUTH_KEY >&2
         [[ -n "${TAILSCALE_AUTH_KEY}" ]] && save_config_var "TAILSCALE_AUTH_KEY" "${TAILSCALE_AUTH_KEY}" "${config_file}"
     fi
     
     if [[ -z "${STATIC_IP:-}" ]]; then
-        read -rp "Enter Static IP with CIDR (e.g., 192.168.1.100/24, or press Enter for DHCP): " STATIC_IP
+        read -rp "Enter Static IP with CIDR (e.g., 192.168.1.100/24, or press Enter for DHCP): " STATIC_IP >&2
         [[ -n "${STATIC_IP}" ]] && save_config_var "STATIC_IP" "${STATIC_IP}" "${config_file}"
     fi
     if [[ -n "${STATIC_IP:-}" && -z "${STATIC_GATEWAY:-}" ]]; then
-        read -rp "Enter Gateway IP (router IP): " STATIC_GATEWAY
+        read -rp "Enter Gateway IP (router IP): " STATIC_GATEWAY >&2
         [[ -n "${STATIC_GATEWAY}" ]] && save_config_var "STATIC_GATEWAY" "${STATIC_GATEWAY}" "${config_file}"
     fi
     
     # Reload config
     # shellcheck source=/dev/null
     source "${config_file}"
-    echo
+    echo >&2
 }
 
 save_config_var() {
@@ -302,17 +316,17 @@ select_modules() {
     [[ -n "${selected_modules}" ]] && { IFS=',' read -ra MODULES_TO_INSTALL <<< "${selected_modules}"; return 0; }
     [[ "${non_interactive}" == "true" ]] && { MODULES_TO_INSTALL=($(printf '%s\n' "${MODULES[@]}" | cut -d':' -f1)); return 0; }
     
-    echo -e "\n${BOLD}Select modules to install:${NC}"
-    echo "Enter comma-separated numbers (e.g., 1,3,5) or 'all' for everything."
-    echo
+    echo -e "\n${BOLD}Select modules to install:${NC}" >&2
+    echo "Enter comma-separated numbers (e.g., 1,3,5) or 'all' for everything." >&2
+    echo >&2
     local i=1
     for module_entry in "${MODULES[@]}"; do
         local module_name="${module_entry%%:*}" module_desc="${module_entry#*:}"
-        printf "  ${CYAN}%2d)${NC} %-12s - %s\n" "${i}" "${module_name}" "${module_desc}"
+        printf "  ${CYAN}%2d)${NC} %-12s - %s\n" "${i}" "${module_name}" "${module_desc}" >&2
         ((i++))
     done
-    echo
-    read -rp "Selection [all]: " selection; selection="${selection:-all}"
+    echo >&2
+    read -rp "Selection [all]: " selection >&2; selection="${selection:-all}"
     
     if [[ "${selection,,}" == "all" || "${selection,,}" == "a" ]]; then
         MODULES_TO_INSTALL=($(printf '%s\n' "${MODULES[@]}" | cut -d':' -f1))
@@ -394,7 +408,7 @@ generate_summary() {
                 network) summary+="    Tailscale: Connected\n" ;;
                 pihole) summary+="    Web UI: http://${ip}/admin\n    Password: ${PIHOLE_PASSWORD}\n" ;;
                 monitoring) summary+="    Prometheus: http://${ip}:9090\n    Grafana: http://${ip}:3000 (admin / ${GRAFANA_ADMIN_PASSWORD})\n    Alertmanager: http://${ip}:9093\n" ;;
-                samba) summary+="    Webmin: https://${ip}:10000\n    Samba: \\\\${ip}\\${SMB_SHARE_NAME:-pishare}\n" ;;
+                samba) summary+="    Webmin: https://${ip}:10000\n    Samba: \\\\\\\\${ip}\\\\${SMB_SHARE_NAME:-pishare}\n" ;;
                 telegram) summary+="    Service: telegram-bot.service\n" ;;
                 localsend) summary+="    Port: 53317\n" ;;
                 stirling) summary+="    URL: http://${ip}:8080\n" ;;
@@ -414,11 +428,23 @@ generate_summary() {
 show_summary() { generate_summary; }
 
 # ============================================================================
-# SETUP DIRECTORIES (must be called after check_root)
+# SETUP DIRECTORIES - with explicit error handling
 # ============================================================================
 setup_directories() {
-    mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}"
-    chmod 750 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" 2>/dev/null || true
+    log_info "Creating directories: ${LOG_DIR}, ${STATE_DIR}, ${BACKUP_DIR}"
+    mkdir -p "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" || die "Failed to create directories"
+    # Allow owner + group read, so sudo users can read logs
+    chmod 755 "${LOG_DIR}" "${STATE_DIR}" "${BACKUP_DIR}" 2>/dev/null || true
+    log_debug "Directories created successfully"
+}
+
+# Make all module scripts executable
+make_scripts_executable() {
+    log_info "Making module scripts executable..."
+    for script in "${SCRIPT_DIR}"/scripts/*.sh; do
+        [[ -f "${script}" ]] && chmod +x "${script}"
+    done
+    log_debug "All scripts made executable"
 }
 
 # ============================================================================
@@ -469,11 +495,11 @@ EOF
     done
     
     # Experimental warning banner
-    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}"
-    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.             ║${NC}"
-    echo -e "${BOLD}${YELLOW}╚═══════════════════════════════════════════════════════════════════════╝${NC}"
-    echo
+    echo -e "${BOLD}${YELLOW}╔═══════════════════════════════════════════════════════════════════════╗${NC}" >&2
+    echo -e "${BOLD}${YELLOW}║                    ⚠️  EXPERIMENTAL v${SCRIPT_VERSION}                    ║${NC}" >&2
+    echo -e "${BOLD}${YELLOW}║  This is experimental software. Use CLI for production.             ║${NC}" >&2
+    echo -e "${BOLD}${YELLOW}╚═══════════════════════════════════════════════════════════════════════╝${NC}" >&2
+    echo >&2
     
     # Allow dry-run without root
     if [[ "${dry_run}" == "true" ]]; then
@@ -485,6 +511,7 @@ EOF
     # NOW create directories (after root check, or skipped for dry-run)
     if [[ "${dry_run}" != "true" ]]; then
         setup_directories
+        make_scripts_executable
     fi
     
     # Skip all system checks in dry-run mode
@@ -510,10 +537,42 @@ EOF
         log_info "Dry-run: skipping OS/arch/tool checks"
     fi
     
-    # Load configuration
-    [[ ! -f "${config_file}" ]] && [[ -f "${CONFIG_FILE_DEFAULT}" ]] && config_file="${CONFIG_FILE_DEFAULT}"
-    [[ ! -f "${config_file}" ]] && die "Config file not found. Copy config/settings.conf.example to settings.conf"
+    # AUTO-COPY CONFIG FROM TEMPLATE if not exists
+    if [[ ! -f "${config_file}" ]]; then
+        if [[ -f "${CONFIG_FILE_EXAMPLE}" ]]; then
+            log_info "Config not found, copying from template..."
+            cp "${CONFIG_FILE_EXAMPLE}" "${config_file}"
+            chmod 600 "${config_file}"
+            log_info "Created ${config_file} from template"
+        else
+            die "Config file not found and no template at ${CONFIG_FILE_EXAMPLE}"
+        fi
+    fi
     
+    # Skip all system checks in dry-run mode
+    if [[ "${dry_run}" != "true" ]]; then
+        # Ensure basic tools are available
+        local required_base_tools=(curl wget gpg systemctl)
+        for tool in "${required_base_tools[@]}"; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                log_warn "Required tool '$tool' not found, attempting to install..."
+                if command -v apt-get >/dev/null 2>&1; then
+                    apt-get update -qq && apt-get install -y -qq "$tool" 2>/dev/null || true
+                elif command -v pacman >/dev/null 2>&1; then
+                    pacman -Sy --noconfirm "$tool" 2>/dev/null || true
+                elif command -v dnf >/dev/null 2>&1; then
+                    dnf install -y "$tool" 2>/dev/null || true
+                fi
+            fi
+        done
+        
+        check_os
+        check_arch
+    else
+        log_info "Dry-run: skipping OS/arch/tool checks"
+    fi
+    
+    # Load configuration (now guaranteed to exist)
     sanitize_config "${config_file}"
     load_config "${config_file}"
     validate_config
@@ -528,7 +587,7 @@ EOF
     for module in "${MODULES_TO_INSTALL[@]}"; do
         if is_module_installed "${module}"; then
             log_warn "Module ${module} already installed (state: $(get_module_state ${module}))"
-            [[ "${non_interactive}" != "true" ]] && { read -rp "Reinstall ${module}? [y/N] " -n 1 -r; echo; [[ $REPLY =~ ^[Yy]$ ]] && to_install+=("${module}"); } || log_info "Skipping ${module}"
+            [[ "${non_interactive}" != "true" ]] && { read -rp "Reinstall ${module}? [y/N] " -n 1 -r; echo >&2; [[ $REPLY =~ ^[Yy]$ ]] && to_install+=("${module}"); } || log_info "Skipping ${module}"
         else
             to_install+=("${module}")
         fi
@@ -536,18 +595,18 @@ EOF
     MODULES_TO_INSTALL=("${to_install[@]}")
     [[ ${#MODULES_TO_INSTALL[@]} -eq 0 ]] && { log_info "Nothing to install"; exit 0; }
     
-    [[ "${non_interactive}" != "true" ]] && { echo -e "\n${BOLD}Modules to install:${NC} ${MODULES_TO_INSTALL[*]}"; read -rp "Proceed? [Y/n] " -n 1 -r; echo; [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0; }
+    [[ "${non_interactive}" != "true" ]] && { echo -e "\n${BOLD}Modules to install:${NC} ${MODULES_TO_INSTALL[*]}" >&2; read -rp "Proceed? [Y/n] " -n 1 -r; echo >&2; [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0; }
     
     local total=${#MODULES_TO_INSTALL[@]} current=0 failed=()
     for module in "${MODULES_TO_INSTALL[@]}"; do
-        ((current++)); show_progress "${current}" "${total}" "${module}"; echo
+        ((current++)); show_progress "${current}" "${total}" "${module}"; echo >&2
         if execute_module "${module}"; then 
             log_success "Module ${module} completed"
         else 
             log_error "Module ${module} failed"
             failed+=("${module}")
             [[ "${non_interactive}" == "true" ]] && die "Module ${module} failed in non-interactive mode"
-            read -rp "Continue? [Y/n] " -n 1 -r; echo
+            read -rp "Continue? [Y/n] " -n 1 -r; echo >&2
             [[ ! $REPLY =~ ^[Yy]$ ]] && break
         fi
     done
